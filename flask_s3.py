@@ -1,5 +1,6 @@
 import os
 import logging
+import mimetypes
 from collections import defaultdict
 
 from flask import url_for as flask_url_for
@@ -60,7 +61,7 @@ def _gather_files(app, hidden):
         dirs.extend([bp_details(x) for x in blueprints if x.static_folder])
 
     valid_files = defaultdict(list)
-    for static_folder, static_url_loc  in dirs:
+    for static_folder, static_url_loc in dirs:
         if not os.path.isdir(static_folder):
             logger.warning("WARNING - [%s does not exist]" % static_folder)
         else:
@@ -103,6 +104,8 @@ def _write_files(app, static_url_loc, static_folder, files, bucket,
         asset_loc = _path_to_relative_url(file_path)
         key_name = _static_folder_path(static_url_loc, static_folder,
                                        asset_loc)
+        mimetype = mimetypes.guess_type(key_name)[0]
+        is_gzippable = mimetype in app.config['S3_GZIP_CONTENT_TYPES']
         msg = "Uploading %s to %s as %s" % (file_path, bucket, key_name)
         logger.debug(msg)
         if ex_keys and key_name in ex_keys:
@@ -110,8 +113,14 @@ def _write_files(app, static_url_loc, static_folder, files, bucket,
         else:
             k = Key(bucket=bucket, name=key_name)
             # Set custom headers
-            for header, value in app.config['S3_HEADERS'].iteritems():
-                k.set_metadata(header, value)
+            for header, value in app.config['S3_HEADERS'].items():
+                set_header = True
+                # Only set Content-Encoding: gzip if mimetype is gzippable
+                if (header, value) == ('Content-Encoding', 'gzip'):
+                    if not is_gzippable:
+                        set_header = False
+                if set_header:
+                    k.set_metadata(header, value)
             k.set_contents_from_filename(file_path)
             k.make_public()
 
@@ -223,8 +232,12 @@ class FlaskS3(object):
                     ('S3_BUCKET_DOMAIN', 's3.amazonaws.com'),
                     ('S3_CDN_DOMAIN', ''),
                     ('S3_USE_CACHE_CONTROL', False),
-                    ('S3_HEADERS', {})]
-
+                    ('S3_HEADERS', {}),
+                    ('S3_GZIP_CONTENT_TYPES', (
+                        'text/css',
+                        'application/javascript',
+                        'application/x-javascript',
+                    ))]
         for k, v in defaults:
             app.config.setdefault(k, v)
 

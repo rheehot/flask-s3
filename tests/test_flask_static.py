@@ -15,14 +15,14 @@ class FlaskStaticTest(unittest.TestCase):
         @self.app.route('/<url_for_string>')
         def a(url_for_string):
             return render_template_string(url_for_string)
-        
+
     def test_jinja_url_for(self):
         """ Tests that the jinja global gets assigned correctly. """
-        self.assertNotEqual(self.app.jinja_env.globals['url_for'], 
+        self.assertNotEqual(self.app.jinja_env.globals['url_for'],
                             flask_s3.url_for)
         # then we initialise the extension
         FlaskS3(self.app)
-        self.assertEquals(self.app.jinja_env.globals['url_for'], 
+        self.assertEquals(self.app.jinja_env.globals['url_for'],
                           flask_s3.url_for)
 
     def test_config(self):
@@ -30,7 +30,8 @@ class FlaskStaticTest(unittest.TestCase):
         FlaskS3(self.app)
         defaults = ('S3_USE_HTTPS', 'USE_S3', 'USE_S3_DEBUG', 
                     'S3_BUCKET_DOMAIN', 'S3_CDN_DOMAIN',
-                    'S3_USE_CACHE_CONTROL', 'S3_HEADERS')
+                    'S3_USE_CACHE_CONTROL', 'S3_HEADERS',
+                    'S3_GZIP_CONTENT_TYPES')
         for default in defaults:
             self.assertIn(default, self.app.config)
 
@@ -69,7 +70,7 @@ class UrlTests(unittest.TestCase):
         Tests that ValueError raised if bucket address not provided.
         """
         raises = False
-        
+
         del self.app.config['S3_BUCKET_NAME']
 
         try:
@@ -126,6 +127,11 @@ class S3Tests(unittest.TestCase):
         self.app.config['S3_BUCKET_NAME'] = 'foo'
         self.app.config['S3_USE_CACHE_CONTROL'] = True
         self.app.config['S3_CACHE_CONTROL'] = 'cache instruction'
+        self.app.config['S3_GZIP_CONTENT_TYPES'] = (
+            'text/css',
+            'application/javascript',
+            'application/x-javascript',
+        )
         self.app.config['S3_HEADERS'] = {
             'Expires': 'Thu, 31 Dec 2037 23:59:59 GMT',
             'Content-Encoding': 'gzip',
@@ -133,7 +139,7 @@ class S3Tests(unittest.TestCase):
 
     def test__bp_static_url(self):
         """ Tests test__bp_static_url """
-        bps = [Mock(static_url_path='/foo', url_prefix=None), 
+        bps = [Mock(static_url_path='/foo', url_prefix=None),
                Mock(static_url_path=None, url_prefix='/pref'),
                Mock(static_url_path='/b/bar', url_prefix='/pref'),
                Mock(static_url_path=None, url_prefix=None)]
@@ -147,9 +153,9 @@ class S3Tests(unittest.TestCase):
         self.app.static_folder = '/home'
         self.app.static_url_path = '/static'
 
-        bp_a = Mock(static_folder='/home/bar', static_url_path='/a/bar', 
+        bp_a = Mock(static_folder='/home/bar', static_url_path='/a/bar',
                     url_prefix=None)
-        bp_b = Mock(static_folder='/home/zoo', static_url_path='/b/bar', 
+        bp_b = Mock(static_folder='/home/zoo', static_url_path='/b/bar',
                     url_prefix=None)
         bp_c = Mock(static_folder=None)
 
@@ -161,9 +167,9 @@ class S3Tests(unittest.TestCase):
         os_mock.side_effect = dirs.get
         path_mock.return_value = True
 
-        expected = {('/home/bar', u'/a/bar'): ['/home/bar/b'], 
-                    ('/home/zoo', u'/b/bar'): ['/home/zoo/c', 
-                                               '/home/zoo/foo/d', 
+        expected = {('/home/bar', u'/a/bar'): ['/home/bar/b'],
+                    ('/home/zoo', u'/b/bar'): ['/home/zoo/c',
+                                               '/home/zoo/foo/d',
                                                '/home/zoo/foo/e']}
         actual = flask_s3._gather_files(self.app, False)
         self.assertEqual(expected, actual)
@@ -187,7 +193,7 @@ class S3Tests(unittest.TestCase):
         actual = flask_s3._gather_files(self.app, False)
         self.assertEqual({}, actual)
 
-    @patch('os.walk')    
+    @patch('os.walk')
     @patch('os.path.isdir')
     def test__gather_files_bad_folder(self, path_mock, os_mock):
         """
@@ -205,7 +211,7 @@ class S3Tests(unittest.TestCase):
     @patch('os.path.join', side_effect=ntpath.join)
     def test__path_to_relative_url_win(self, join_mock, split_mock):
         """ Tests _path_to_relative_url on Windows system """
-        input_ = [r'C:\foo\bar\baz.css', r'C:\foo\bar.css', 
+        input_ = [r'C:\foo\bar\baz.css', r'C:\foo\bar.css',
                   r'\foo\bar.css']
         expected = ['/foo/bar/baz.css', '/foo/bar.css', '/foo/bar.css']
         for in_, exp in zip(input_, expected):
@@ -217,7 +223,7 @@ class S3Tests(unittest.TestCase):
         """ Tests _write_files """
         static_url_loc = '/foo/static'
         static_folder = '/home/z'
-        assets = ['/home/z/bar.css', '/home/z/foo.css'] 
+        assets = ['/home/z/bar.css', '/home/z/foo.css']
         exclude = ['/foo/static/foo.css', '/foo/static/foo/bar.css']
         # we expect foo.css to be excluded and not uploaded
         expected = [call(bucket=None, name=u'/foo/static/bar.css'),
@@ -225,7 +231,7 @@ class S3Tests(unittest.TestCase):
                     call().set_metadata('Expires', 'Thu, 31 Dec 2037 23:59:59 GMT'),
                     call().set_metadata('Content-Encoding', 'gzip'),
                     call().set_contents_from_filename('/home/z/bar.css')]
-        flask_s3._write_files(self.app, static_url_loc, static_folder, assets, 
+        flask_s3._write_files(self.app, static_url_loc, static_folder, assets,
                               None, exclude)
         self.assertLessEqual(expected, key_mock.mock_calls)
 
@@ -234,7 +240,7 @@ class S3Tests(unittest.TestCase):
         inputs = [('/static', '/home/static', '/home/static/foo.css'),
                   ('/foo/static', '/home/foo/s', '/home/foo/s/a/b.css'),
                   ('/bar/', '/bar/', '/bar/s/a/b.css')]
-        expected = [u'/static/foo.css', u'/foo/static/a/b.css', 
+        expected = [u'/static/foo.css', u'/foo/static/a/b.css',
                     u'/bar/s/a/b.css']
         for i, e in zip(inputs, expected):
             self.assertEquals(e, flask_s3._static_folder_path(*i))
