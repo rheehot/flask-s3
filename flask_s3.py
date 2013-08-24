@@ -43,6 +43,13 @@ def url_for(endpoint, **values):
         if app.config['S3_CDN_DOMAIN']:
             bucket_path = '%s' % app.config['S3_CDN_DOMAIN']
         urls = app.url_map.bind(bucket_path, url_scheme=scheme)
+        try:
+            mimetype = mimetypes.guess_type(values['filename'])[0]
+        except KeyError:
+            mimetype = None
+        if (mimetype in app.config['S3_GZIP_CONTENT_TYPES']) \
+            and app.config['USE_GZIP']:
+            values['filename'] = "%s.gz" % values['filename'] 
         return urls.build(endpoint, values=values, force_external=True)
     return flask_url_for(endpoint, **values)
 
