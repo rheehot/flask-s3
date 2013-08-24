@@ -1,4 +1,5 @@
 import os
+import zlib
 import logging
 import mimetypes
 from collections import defaultdict
@@ -106,24 +107,34 @@ def _write_files(app, static_url_loc, static_folder, files, bucket,
                                        asset_loc)
         mimetype = mimetypes.guess_type(key_name)[0]
         is_gzippable = mimetype in app.config['S3_GZIP_CONTENT_TYPES']
+        headers = app.config['S3_HEADERS']
         msg = "Uploading %s to %s as %s" % (file_path, bucket, key_name)
         logger.debug(msg)
         if ex_keys and key_name in ex_keys:
             logger.debug("%s excluded from upload" % key_name)
         else:
-            k = Key(bucket=bucket, name=key_name)
-            # Set custom headers
-            for header, value in app.config['S3_HEADERS'].items():
-                set_header = True
-                # Only set Content-Encoding: gzip if mimetype is gzippable
-                if (header, value) == ('Content-Encoding', 'gzip'):
-                    if not is_gzippable:
-                        set_header = False
-                if set_header:
-                    k.set_metadata(header, value)
-            k.set_contents_from_filename(file_path)
-            k.make_public()
+            do_gzip = app.config['USE_GZIP'] and is_gzippable
+            # upload origin file
+            _upload_file(file_path, bucket, key_name, headers)
+            # upload gzipped file (if enabled)
+            if do_gzip:
+                _upload_file(file_path, bucket, key_name, headers, True)
 
+def _upload_file(file_path, bucket, key_name, headers={}, gzip=False):
+    k = Key(bucket=bucket, name=key_name)
+    for header, value in headers.items():
+        if (header, value) != ('Content-Encoding', 'gzip'):
+            k.set_metadata(header, value)
+        elif gzip:
+            k.set_metadata(header, value)
+    with open(file_path) as f:
+        content = f.read()
+        if gzip:
+            content = zlib.compress(content)
+        k.set_contents_from_string(content)
+    k.set_contents_from_filename(file_path)
+    k.make_public()
+    return k
 
 def _upload_files(app, files_, bucket):
     for (static_folder, static_url), names in files_.iteritems():
@@ -228,6 +239,7 @@ class FlaskS3(object):
         """
         defaults = [('S3_USE_HTTPS', True),
                     ('USE_S3', True),
+                    ('USE_GZIP', True),
                     ('USE_S3_DEBUG', False),
                     ('S3_BUCKET_DOMAIN', 's3.amazonaws.com'),
                     ('S3_CDN_DOMAIN', ''),
