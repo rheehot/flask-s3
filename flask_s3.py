@@ -118,7 +118,10 @@ def _write_files(app, static_url_loc, static_folder, files, bucket,
             _upload_file(file_path, bucket, key_name, headers)
             # upload gzipped file (if enabled)
             if do_gzip:
-                _upload_file(file_path, bucket, key_name, headers, True)
+                gzip_file_path = "%s.gz" % file_path
+                gzip_key_name = "%s.gz" % key_name 
+                _upload_file(gzip_file_path, bucket, gzipkey_name, headers,
+                             True)
 
 def _upload_file(file_path, bucket, key_name, headers={}, gzip=False):
     k = Key(bucket=bucket, name=key_name)
@@ -132,7 +135,6 @@ def _upload_file(file_path, bucket, key_name, headers={}, gzip=False):
         if gzip:
             content = zlib.compress(content)
         k.set_contents_from_string(content)
-    k.set_contents_from_filename(file_path)
     k.make_public()
     return k
 
