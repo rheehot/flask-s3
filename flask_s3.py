@@ -126,16 +126,15 @@ def _write_files(app, static_url_loc, static_folder, files, bucket,
             # upload gzipped file (if enabled)
             if do_gzip:
                 gzip_key_name = "%s.gz" % key_name 
-                _upload_file(file_path, bucket, gzipkey_name, headers, True)
+                _upload_file(file_path, bucket, gzip_key_name, headers, True)
 
 def _upload_file(file_path, bucket, key_name, headers={}, gzip=False):
     k = Key(bucket=bucket, name=key_name)
     for header, value in headers.items():
         if (header, value) != ('Content-Encoding', 'gzip'):
             k.set_metadata(header, value)
-        elif gzip:
-            k.set_metadata(header, value)
     with open(file_path) as f:
+        k.set_metadata('Content-Encoding', 'gzip')
         content = f.read()
         if gzip:
             content = zlib.compress(content)
