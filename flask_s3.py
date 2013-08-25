@@ -1,5 +1,9 @@
 import os
-import zlib
+import gzip
+try:
+    from cStringIO import StringIO
+except ImportError:
+    from StringIO import StringIO
 import logging
 import mimetypes
 from collections import defaultdict
@@ -128,17 +132,28 @@ def _write_files(app, static_url_loc, static_folder, files, bucket,
                 gzip_key_name = "%s.gz" % key_name 
                 _upload_file(file_path, bucket, gzip_key_name, headers, True)
 
-def _upload_file(file_path, bucket, key_name, headers={}, gzip=False):
+def _upload_file(file_path, bucket, key_name, headers={}, do_gzip=False):
     k = Key(bucket=bucket, name=key_name)
     for header, value in headers.items():
         if (header, value) != ('Content-Encoding', 'gzip'):
             k.set_metadata(header, value)
+    mimetype = mimetypes.guess_type(file_path)[0]
+    k.set_metadata('Content-Type', mimetype)
     with open(file_path) as f:
-        k.set_metadata('Content-Encoding', 'gzip')
         content = f.read()
-        if gzip:
-            content = zlib.compress(content)
+        if do_gzip:
+            k.set_metadata('Content-Encoding', 'gzip')
+            gzipped = StringIO()
+            with gzip.GzipFile(fileobj=gzipped, mode='w') as _gzip:
+                _gzip.write(content)
+            content = gzipped.getvalue()
+    try:
         k.set_contents_from_string(content)
+    except S3ResponseError:
+        if not do_gzip:
+            k.set_contents_from_filename(file_path)
+        else:
+            raise
     k.make_public()
     return k
 
