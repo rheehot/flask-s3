@@ -15,6 +15,7 @@ from boto.exception import S3CreateError, S3ResponseError
 from boto.s3.key import Key
 
 logger = logging.getLogger('flask_s3')
+mimetypes.add_type('text/css', '.less')
 
 
 def url_for(endpoint, **values):
