@@ -11,7 +11,7 @@ from collections import defaultdict
 from flask import url_for as flask_url_for
 from flask import current_app
 from boto.s3.connection import S3Connection
-from boto.exception import S3CreateError
+from boto.exception import S3CreateError, S3ResponseError
 from boto.s3.key import Key
 
 logger = logging.getLogger('flask_s3')
