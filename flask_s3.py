@@ -139,7 +139,8 @@ def _upload_file(file_path, bucket, key_name, headers={}, do_gzip=False):
         if (header, value) != ('Content-Encoding', 'gzip'):
             k.set_metadata(header, value)
     mimetype = mimetypes.guess_type(file_path)[0]
-    k.set_metadata('Content-Type', mimetype)
+    if mimetype:
+        k.set_metadata('Content-Type', mimetype)
     with open(file_path) as f:
         content = f.read()
         if do_gzip:
