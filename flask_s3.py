@@ -1,3 +1,5 @@
+import gevent
+from gevent import monkey; monkey.patch_all()
 import os
 import gzip
 try:
@@ -35,6 +37,9 @@ def url_for(endpoint, **values):
     app = current_app
     if 'S3_BUCKET_NAME' not in app.config:
         raise ValueError("S3_BUCKET_NAME not found in app configuration.")
+
+    if app.debug and not app.config['USE_S3_DEBUG']:
+        return flask_url_for(endpoint, **values)
 
     if endpoint == 'static' or endpoint.endswith('.static'):
         scheme = 'http'
@@ -110,6 +115,7 @@ def _static_folder_path(static_url, static_folder, static_asset):
 def _write_files(app, static_url_loc, static_folder, files, bucket,
                  ex_keys=None):
     """ Writes all the files inside a static folder to S3. """
+    tasks = []
     for file_path in files:
         asset_loc = _path_to_relative_url(file_path)
         key_name = _static_folder_path(static_url_loc, static_folder,
@@ -124,11 +130,13 @@ def _write_files(app, static_url_loc, static_folder, files, bucket,
         else:
             do_gzip = app.config['USE_GZIP'] and is_gzippable
             # upload origin file
-            _upload_file(file_path, bucket, key_name, headers)
+            tasks.append((file_path, bucket, key_name, headers))
             # upload gzipped file (if enabled)
             if do_gzip:
                 gzip_key_name = "%s.gz" % key_name 
-                _upload_file(file_path, bucket, gzip_key_name, headers, True)
+                tasks.append((file_path, bucket, gzip_key_name, headers, True))
+    threads = [gevent.spawn(_upload_file, *x) for x in tasks]
+    gevent.joinall(threads)
 
 def _upload_file(file_path, bucket, key_name, headers={}, do_gzip=False):
     k = Key(bucket=bucket, name=key_name)
@@ -228,7 +236,7 @@ def create_all(app, user=None, password=None, bucket_name=None,
     # get_or_create bucket
     try:
         bucket = conn.create_bucket(bucket_name, location=location)
-        bucket.make_public(recursive=True)
+        bucket.make_public()
     except S3CreateError as e:
         raise e
     _upload_files(app, all_files, bucket)
@@ -273,11 +281,9 @@ class FlaskS3(object):
         for k, v in defaults:
             app.config.setdefault(k, v)
 
-        if app.debug and not app.config['USE_S3_DEBUG']:
-            app.config['USE_S3'] = False
-
         if app.config['USE_S3']:
             app.jinja_env.globals['url_for'] = url_for
         if app.config['S3_USE_CACHE_CONTROL'] and 'S3_CACHE_CONTROL' in app.config:
             cache_control_header = app.config['S3_CACHE_CONTROL']
             app.config['S3_HEADERS']['Cache-Control'] = cache_control_header
+
