@@ -9,8 +9,8 @@ from setuptools import setup
 
 setup(
     name='Flask-S3',
-    version='0.1.5',
-    url='https://github.com/xymz/flask-s3.git',
+    version='0.1.6',
+    url='http://github.com/spoqa/flask-s3',
     license='WTFPL',
     author='xymz',
     author_email='xym@spoqa.com',

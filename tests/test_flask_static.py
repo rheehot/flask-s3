@@ -28,7 +28,7 @@ class FlaskStaticTest(unittest.TestCase):
     def test_config(self):
         """ Tests configuration vars exist. """
         FlaskS3(self.app)
-        defaults = ('S3_USE_HTTPS', 'USE_S3', 'USE_S3_DEBUG', 
+        defaults = ('S3_USE_HTTPS', 'USE_S3', 'USE_S3_DEBUG',
                     'S3_BUCKET_DOMAIN', 'S3_CDN_DOMAIN',
                     'S3_USE_CACHE_CONTROL', 'S3_HEADERS',
                     'S3_GZIP_CONTENT_TYPES')
@@ -84,7 +84,7 @@ class UrlTests(unittest.TestCase):
         """
         Tests that correct url formed for static asset in self.app.
         """
-        # non static endpoint url_for in template 
+        # non static endpoint url_for in template
         self.assertEquals(self.client_get('').data, '/')
         # static endpoint url_for in template
         ufs = "{{url_for('static', filename='bah.js')}}"
@@ -98,7 +98,12 @@ class UrlTests(unittest.TestCase):
         ufs = "{{url_for('static', filename='bah.js')}}"
         exp = '/static/bah.js'
         self.assertEquals(self.client_get(ufs).data, exp)
+
+    def test_url_for_debug_override(self):
+        """Tests Flask-S3 behavior in debug mode with USE_S3_DEBUG turned on."""
+        self.app.debug = True
         self.app.config['USE_S3_DEBUG'] = True
+        ufs = "{{url_for('static', filename='bah.js')}}"
         exp = 'https://foo.s3.amazonaws.com/static/bah.js'
         self.assertEquals(self.client_get(ufs).data, exp)
 
