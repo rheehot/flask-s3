@@ -115,6 +115,7 @@ def _static_folder_path(static_url, static_folder, static_asset):
 def _write_files(app, static_url_loc, static_folder, files, bucket,
                  ex_keys=None):
     """ Writes all the files inside a static folder to S3. """
+    pool = gevent.pool.Pool(30)
     tasks = []
     for file_path in files:
         asset_loc = _path_to_relative_url(file_path)
@@ -130,13 +131,12 @@ def _write_files(app, static_url_loc, static_folder, files, bucket,
         else:
             do_gzip = app.config['USE_GZIP'] and is_gzippable
             # upload origin file
-            tasks.append((file_path, bucket, key_name, headers))
+            tasks.append(pool.spawn(_upload_file, file_path, bucket, key_name, headers))
             # upload gzipped file (if enabled)
             if do_gzip:
                 gzip_key_name = "%s.gz" % key_name 
-                tasks.append((file_path, bucket, gzip_key_name, headers, True))
-    threads = [gevent.spawn(_upload_file, *x) for x in tasks]
-    gevent.joinall(threads)
+                tasks.append(pool.spawn(_upload_file, file_path, bucket, gzip_key_name, headers, True))
+    gevent.joinall(tasks)
 
 def _upload_file(file_path, bucket, key_name, headers={}, do_gzip=False):
     k = Key(bucket=bucket, name=key_name)
@@ -161,6 +161,9 @@ def _upload_file(file_path, bucket, key_name, headers={}, do_gzip=False):
             k.set_contents_from_filename(file_path)
         else:
             raise
+    except Exception, e:
+        print file_path, bucket, key_name, do_gzip, e
+        return
     k.make_public()
     return k
 
@@ -235,10 +238,13 @@ def create_all(app, user=None, password=None, bucket_name=None,
     conn = S3Connection(user, password) # connect to s3
     # get_or_create bucket
     try:
-        bucket = conn.create_bucket(bucket_name, location=location)
-        bucket.make_public()
-    except S3CreateError as e:
-        raise e
+        bucket = conn.get_bucket(bucket_name)
+    except S3ResponseError:
+        try:
+            bucket = conn.create_bucket(bucket_name, location=location)
+            bucket.make_public()
+        except S3CreateError as e:
+            raise e
     _upload_files(app, all_files, bucket)
 
 
