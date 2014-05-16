@@ -226,9 +226,10 @@ class S3Tests(unittest.TestCase):
     @patch('flask_s3.Key')
     def test__write_files(self, key_mock):
         """ Tests _write_files """
+        FlaskS3(self.app)
         static_url_loc = '/foo/static'
-        static_folder = '/home/z'
-        assets = ['/home/z/bar.css', '/home/z/foo.css']
+        static_folder = 'tests/'
+        assets = ['tests/bar.css', 'tests/foo.css']
         exclude = ['/foo/static/foo.css', '/foo/static/foo/bar.css']
         # we expect foo.css to be excluded and not uploaded
         expected = [call(bucket=None, name=u'/foo/static/bar.css'),
