@@ -8,10 +8,10 @@ from setuptools import setup
 
 
 setup(
-    name='Flask-S3',
+    name='Flask-S3-gzip',
     version='0.1.6',
     url='http://github.com/spoqa/flask-s3',
-    license='WTFPL',
+    license='MIT License',
     author='xymz',
     author_email='xym@spoqa.com',
     description='Seamlessly serve the static files of your Flask app from Amazon S3',
