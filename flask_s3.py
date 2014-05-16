@@ -1,5 +1,5 @@
+from concurrent.futures import ThreadPoolExecutor
 import os
-import eventlet
 import gzip
 try:
     from cStringIO import StringIO
@@ -117,28 +117,26 @@ def _static_folder_path(static_url, static_folder, static_asset):
 def _write_files(app, static_url_loc, static_folder, files, bucket,
                  ex_keys=None):
     """ Writes all the files inside a static folder to S3. """
-    pool = eventlet.GreenPool(32)
-    tasks = []
-    for file_path in files:
-        asset_loc = _path_to_relative_url(file_path)
-        key_name = _static_folder_path(static_url_loc, static_folder,
-                                       asset_loc)
-        mimetype = mimetypes.guess_type(key_name)[0]
-        is_gzippable = mimetype in app.config['S3_GZIP_CONTENT_TYPES']
-        headers = app.config['S3_HEADERS']
-        msg = "Uploading %s to %s as %s" % (file_path, bucket, key_name)
-        logger.debug(msg)
-        if ex_keys and key_name in ex_keys:
-            logger.debug("%s excluded from upload" % key_name)
-        else:
-            do_gzip = app.config['USE_GZIP'] and is_gzippable
-            # upload origin file
-            tasks.append(pool.spawn(_upload_file, file_path, bucket, key_name, headers))
-            # upload gzipped file (if enabled)
-            if do_gzip:
-                gzip_key_name = "%s.gz" % key_name 
-                pool.spawn(_upload_file, file_path, bucket, gzip_key_name, headers, True)
-    pool.waitall()
+    with ThreadPoolExecutor(app.config['S3_UPLOAD_COCURRENCY']) as executor:
+        for file_path in files:
+            asset_loc = _path_to_relative_url(file_path)
+            key_name = _static_folder_path(static_url_loc, static_folder,
+                                           asset_loc)
+            mimetype = mimetypes.guess_type(key_name)[0]
+            is_gzippable = mimetype in app.config['S3_GZIP_CONTENT_TYPES']
+            headers = app.config['S3_HEADERS']
+            msg = "Uploading %s to %s as %s" % (file_path, bucket, key_name)
+            logger.debug(msg)
+            if ex_keys and key_name in ex_keys:
+                logger.debug("%s excluded from upload" % key_name)
+            else:
+                do_gzip = app.config['USE_GZIP'] and is_gzippable
+                # upload origin file
+                executor.submit(_upload_file, file_path, bucket, key_name, headers)
+                # upload gzipped file (if enabled)
+                if do_gzip:
+                    gzip_key_name = "%s.gz" % key_name
+                    executor.submit(_upload_file, file_path, bucket, gzip_key_name, headers, True)
 
 def _upload_file(file_path, bucket, key_name, headers={}, do_gzip=False):
     k = Key(bucket=bucket, name=key_name)
@@ -163,9 +161,6 @@ def _upload_file(file_path, bucket, key_name, headers={}, do_gzip=False):
             k.set_contents_from_filename(file_path)
         else:
             raise
-    except Exception, e:
-        print file_path, bucket, key_name, do_gzip, e
-        return
     k.make_public()
     return k
 
@@ -226,7 +221,6 @@ def create_all(app, user=None, password=None, bucket_name=None,
     /latest/dev/BucketRestrictions.html
 
     """
-    eventlet.monkey_patch()
     if user is None and 'AWS_ACCESS_KEY_ID' in app.config:
         user = app.config['AWS_ACCESS_KEY_ID']
     if password is None and 'AWS_SECRET_ACCESS_KEY' in app.config:
@@ -276,7 +270,7 @@ class FlaskS3(object):
         """
         defaults = [('S3_USE_HTTPS', True),
                     ('USE_S3', True),
-                    ('USE_GZIP', True),
+                    ('USE_GZIP', False),
                     ('USE_S3_DEBUG', False),
                     ('S3_BUCKET_DOMAIN', 's3.amazonaws.com'),
                     ('S3_CDN_DOMAIN', ''),
@@ -286,7 +280,8 @@ class FlaskS3(object):
                         'text/css',
                         'application/javascript',
                         'application/x-javascript',
-                    ))]
+                    )),
+                    ('S3_UPLOAD_COCURRENCY', 32)]
         for k, v in defaults:
             app.config.setdefault(k, v)
 
