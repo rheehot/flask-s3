@@ -22,7 +22,8 @@ setup(
     platforms='any',
     install_requires=[
         'Flask',
-        'Boto>=2.5.2'
+        'Boto>=2.5.2',
+        'eventlet'
     ],
     tests_require=['nose', 'mock'],
     classifiers=[

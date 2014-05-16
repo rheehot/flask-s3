@@ -1,6 +1,5 @@
-import gevent
-from gevent import monkey; monkey.patch_all()
 import os
+import eventlet
 import gzip
 try:
     from cStringIO import StringIO
@@ -15,6 +14,9 @@ from flask import current_app
 from boto.s3.connection import S3Connection
 from boto.exception import S3CreateError, S3ResponseError
 from boto.s3.key import Key
+
+
+
 
 logger = logging.getLogger('flask_s3')
 mimetypes.add_type('text/css', '.less')
@@ -115,7 +117,7 @@ def _static_folder_path(static_url, static_folder, static_asset):
 def _write_files(app, static_url_loc, static_folder, files, bucket,
                  ex_keys=None):
     """ Writes all the files inside a static folder to S3. """
-    pool = gevent.pool.Pool(30)
+    pool = eventlet.GreenPool(32)
     tasks = []
     for file_path in files:
         asset_loc = _path_to_relative_url(file_path)
@@ -135,8 +137,8 @@ def _write_files(app, static_url_loc, static_folder, files, bucket,
             # upload gzipped file (if enabled)
             if do_gzip:
                 gzip_key_name = "%s.gz" % key_name 
-                tasks.append(pool.spawn(_upload_file, file_path, bucket, gzip_key_name, headers, True))
-    gevent.joinall(tasks)
+                pool.spawn(_upload_file, file_path, bucket, gzip_key_name, headers, True)
+    pool.waitall()
 
 def _upload_file(file_path, bucket, key_name, headers={}, do_gzip=False):
     k = Key(bucket=bucket, name=key_name)
@@ -224,6 +226,7 @@ def create_all(app, user=None, password=None, bucket_name=None,
     /latest/dev/BucketRestrictions.html
 
     """
+    eventlet.monkey_patch()
     if user is None and 'AWS_ACCESS_KEY_ID' in app.config:
         user = app.config['AWS_ACCESS_KEY_ID']
     if password is None and 'AWS_SECRET_ACCESS_KEY' in app.config:
