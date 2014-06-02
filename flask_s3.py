@@ -51,6 +51,8 @@ def url_for(endpoint, **values):
                                  app.config['S3_BUCKET_DOMAIN'])
         if app.config['S3_CDN_DOMAIN']:
             bucket_path = '%s' % app.config['S3_CDN_DOMAIN']
+        if app.config['S3_PREFIX']:
+            bucket_path = "/".join((bucket_path, app.config['S3_PREFIX']))
         urls = app.url_map.bind(bucket_path, url_scheme=scheme)
         try:
             mimetype = mimetypes.guess_type(values['filename'])[0]
@@ -96,7 +98,7 @@ def _path_to_relative_url(path):
     return os.path.splitdrive(path)[1].replace('\\', '/')
 
 
-def _static_folder_path(static_url, static_folder, static_asset):
+def _static_folder_path(static_url, static_folder, static_asset, prefix=''):
     """ 
     Returns a path to a file based on the static folder, and not on the 
     filesystem holding the file.
@@ -111,7 +113,10 @@ def _static_folder_path(static_url, static_folder, static_asset):
                          (static_asset, static_folder))
     rel_asset = static_asset[len(static_folder):]
     # Now bolt the static url path and the relative asset location together
-    return u'%s/%s' % (static_url.rstrip('/'), rel_asset.lstrip('/'))
+    key = u'%s/%s' % (static_url.rstrip('/'), rel_asset.lstrip('/'))
+    if prefix:
+        key = u'%s/%s' % (prefix, key)
+    return key
 
 
 def _write_files(app, static_url_loc, static_folder, files, bucket,
@@ -121,7 +126,7 @@ def _write_files(app, static_url_loc, static_folder, files, bucket,
         for file_path in files:
             asset_loc = _path_to_relative_url(file_path)
             key_name = _static_folder_path(static_url_loc, static_folder,
-                                           asset_loc)
+                                           asset_loc, app.config['S3_PREFIX'])
             mimetype = mimetypes.guess_type(key_name)[0]
             is_gzippable = mimetype in app.config['S3_GZIP_CONTENT_TYPES']
             headers = app.config['S3_HEADERS']
@@ -285,6 +290,7 @@ class FlaskS3(object):
                         'application/javascript',
                         'application/x-javascript',
                     )),
+                    ('S3_PREFIX', None),
                     ('S3_UPLOAD_COCURRENCY', 32)]
         for k, v in defaults:
             app.config.setdefault(k, v)
