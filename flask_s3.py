@@ -247,7 +247,6 @@ def create_all(app, user=None, password=None, bucket_name=None,
                 bucket = conn.get_bucket(bucket_name)
             else:
                 raise e
-
         bucket.make_public(recursive=True)
     except S3CreateError as e:
         raise e
