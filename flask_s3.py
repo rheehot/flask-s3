@@ -235,13 +235,17 @@ def create_all(app, user=None, password=None, bucket_name=None,
     conn = S3Connection(user, password) # connect to s3
     # get_or_create bucket
     try:
-        bucket = conn.get_bucket(bucket_name)
-    except S3ResponseError:
         try:
             bucket = conn.create_bucket(bucket_name, location=location)
-            bucket.make_public()
         except S3CreateError as e:
-            raise e
+            if e.error_code == u'BucketAlreadyOwnedByYou':
+                bucket = conn.get_bucket(bucket_name)
+            else:
+                raise e
+
+        bucket.make_public(recursive=True)
+    except S3CreateError as e:
+        raise e
     _upload_files(app, all_files, bucket)
 
 
