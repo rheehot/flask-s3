@@ -207,6 +207,12 @@ uploading assets to S3.
                             **Note**: if `USE_S3` is set to `False` then
                             templates will always include asset locations
                             specified by `flask.url_for`.
+`USE_GZIP`                  Whether to gzip files.
+                            **Default:** `False`
+`S3_GZIP_CONTENT_TYPES`     Mimetypes to gzip.
+                            **Default:** :mimetype:`text/css`,
+                            :mimetype:`application/javascript`,
+                            :mimetype:`application/x-javascript`
 `S3_HEADERS`                Sets custom headers to be sent with each file to S3.
                             **Default:** `{}`
 `S3_CACHE_CONTROL`          **Deprecated**. Please use `S3_HEADERS` instead.
