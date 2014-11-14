@@ -184,9 +184,6 @@ uploading assets to S3.
                             bucket name in the base url.
 `S3_BUCKET_NAME`            The desired name for your Amazon S3 bucket. Note:
                             the name will be visible in all your assets' URLs.
-`S3_USE_HTTPS`              Specifies whether or not to serve your assets
-                            stored in S3 over HTTPS.
-                            **Default:** `True`
 `USE_S3`                    This setting allows you to toggle whether Flask-S3
                             is active or not. When set to `False` your
                             application's templates will revert to including
@@ -207,6 +204,10 @@ uploading assets to S3.
                             **Note**: if `USE_S3` is set to `False` then
                             templates will always include asset locations
                             specified by `flask.url_for`.
+`S3_URL_SCHEME`             URL scheme (``http`` or ``https``) to follow
+                            by the reset of URL.  By default, it makes the
+                            url scheme context depended
+                            e.g. ``//domain.com/path.jpg``.
 `USE_GZIP`                  Whether to gzip files.
                             **Default:** `False`
 `S3_GZIP_CONTENT_TYPES`     Mimetypes to gzip.
@@ -217,6 +218,7 @@ uploading assets to S3.
                             **Default:** `{}`
 `S3_CACHE_CONTROL`          **Deprecated**. Please use `S3_HEADERS` instead.
 `S3_USE_CACHE_CONTROL`      **Deprecated**. Please use `S3_HEADERS` instead.
+`S3_USE_HTTPS`              **Deprecated**. Please use `S3_URL_SCHEME` instead.
 =========================== ===================================================
 
 .. _debug: http://flask.pocoo.org/docs/config/#configuration-basics
