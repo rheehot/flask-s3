@@ -1,5 +1,6 @@
 from concurrent.futures import ThreadPoolExecutor
 import os
+import re
 import gzip
 try:
     from cStringIO import StringIO
@@ -45,8 +46,7 @@ def url_for(endpoint, **values):
 
     if endpoint == 'static' or endpoint.endswith('.static'):
         scheme = 'http'
-        if app.config['S3_USE_HTTPS']:
-            scheme = 'https'
+        scheme = app.config['S3_URL_SCHEME'] or 'https'
         bucket_path = '%s.%s' % (app.config['S3_BUCKET_NAME'],
                                  app.config['S3_BUCKET_DOMAIN'])
         if app.config['S3_CDN_DOMAIN']:
@@ -61,7 +61,10 @@ def url_for(endpoint, **values):
         if (mimetype in app.config['S3_GZIP_CONTENT_TYPES']) \
             and app.config['USE_GZIP']:
             values['filename'] = "%s.gz" % values['filename'] 
-        return urls.build(endpoint, values=values, force_external=True)
+        url = urls.build(endpoint, values=values, force_external=True)
+        if app.config['S3_URL_SCHEME'] is None:
+            url = re.sub(r'^https://', '//', url)
+        return url
     return flask_url_for(endpoint, **values)
 
 
@@ -278,7 +281,8 @@ class FlaskS3(object):
 
         :param app: the :class:`flask.Flask` application object.
         """
-        defaults = [('S3_USE_HTTPS', True),
+        defaults = [('S3_URL_SCHEME', None),
+                    ('S3_USE_HTTPS', None),
                     ('USE_S3', True),
                     ('USE_GZIP', False),
                     ('USE_S3_DEBUG', False),
@@ -301,4 +305,8 @@ class FlaskS3(object):
         if app.config['S3_USE_CACHE_CONTROL'] and 'S3_CACHE_CONTROL' in app.config:
             cache_control_header = app.config['S3_CACHE_CONTROL']
             app.config['S3_HEADERS']['Cache-Control'] = cache_control_header
+        if app.config['S3_URL_SCHEME'] is None and \
+           app.config['S3_USE_HTTPS'] is not None:
+            scheme = 'https' if app.config['S3_USE_HTTPS'] else 'http'
+            app.config['S3_URL_SCHEME'] = scheme
 
