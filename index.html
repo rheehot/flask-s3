@@ -1,0 +1,381 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+  "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    
+    <title>Flask-S3 &mdash; flask-S3 0.1 documentation</title>
+    
+    <link rel="stylesheet" href="_static/flasky.css" type="text/css" />
+    <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
+    
+    <script type="text/javascript">
+      var DOCUMENTATION_OPTIONS = {
+        URL_ROOT:    './',
+        VERSION:     '0.1',
+        COLLAPSE_INDEX: false,
+        FILE_SUFFIX: '.html',
+        HAS_SOURCE:  true
+      };
+    </script>
+    <script type="text/javascript" src="_static/jquery.js"></script>
+    <script type="text/javascript" src="_static/underscore.js"></script>
+    <script type="text/javascript" src="_static/doctools.js"></script>
+    <link rel="top" title="flask-S3 0.1 documentation" href="#" /> 
+  </head>
+  <body>
+  
+  
+  <div class=indexwrapper>
+  
+
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          <div class="body">
+            
+  <div class="section" id="module-flask_s3">
+<span id="flask-s3"></span><h1>Flask-S3<a class="headerlink" href="#module-flask_s3" title="Permalink to this headline">¶</a></h1>
+<p>Flask-S3 allows you to easily serve all your <a class="reference external" href="http://flask.pocoo.org/">Flask</a> application&#8217;s
+static assets from <a class="reference external" href="http://aws.amazon.com/s3">Amazon S3</a>, without having to modify your
+templates.</p>
+<div class="section" id="how-it-works">
+<h2>How it works<a class="headerlink" href="#how-it-works" title="Permalink to this headline">¶</a></h2>
+<p>Flask-S3 has two main functions:</p>
+<blockquote>
+<div><ol class="arabic simple">
+<li>Walk through your application&#8217;s static folders, gather all your
+static assets together, and upload them to a bucket of your choice
+on S3;</li>
+<li>Replace the URLs that Flask&#8217;s <a class="reference external" href="http://flask.pocoo.org/docs/api/#flask.url_for" title="(in Flask v1.0-dev)"><tt class="xref py py-func docutils literal"><span class="pre">flask.url_for()</span></tt></a> function would
+insert into your templates, with URLs that point to the static
+assets in your S3 bucket.</li>
+</ol>
+</div></blockquote>
+<p>The process of gathering and uploading your static assets to S3 need
+only be done once, and your application does not need to be running for
+it to work. The location of the S3 bucket can be inferred from Flask-S3
+<a class="reference internal" href="#settings">settings</a> specified in your Flask application, therefore when your
+application is running there need not be any communication between the
+Flask application and Amazon S3.</p>
+<p>Internally, every time <tt class="docutils literal"><span class="pre">url_for</span></tt> is called in one of your
+application&#8217;s templates, <a class="reference internal" href="#flask_s3.url_for" title="flask_s3.url_for"><tt class="xref py py-obj docutils literal"><span class="pre">flask_s3.url_for</span></tt></a> is instead invoked. If the
+endpoint provided is deemed to refer to static assets, then the S3 URL
+for the asset specified in the <tt class="xref py py-obj docutils literal"><span class="pre">filename</span></tt> argument is instead returned.
+Otherwise, <a class="reference internal" href="#flask_s3.url_for" title="flask_s3.url_for"><tt class="xref py py-obj docutils literal"><span class="pre">flask_s3.url_for</span></tt></a> passes the call on to <a class="reference external" href="http://flask.pocoo.org/docs/api/#flask.url_for" title="(in Flask v1.0-dev)"><tt class="xref py py-obj docutils literal"><span class="pre">flask.url_for</span></tt></a>.</p>
+</div>
+<div class="section" id="installation">
+<h2>Installation<a class="headerlink" href="#installation" title="Permalink to this headline">¶</a></h2>
+<p>If you use pip then installation is simply:</p>
+<div class="highlight-python"><div class="highlight"><pre>$ pip install flask-s3
+</pre></div>
+</div>
+<p>or, if you want the latest github version:</p>
+<div class="highlight-python"><div class="highlight"><pre>$ pip install git+git://github.com/e-dard/flask-s3.git
+</pre></div>
+</div>
+<p>You can also install Flask-S3 via Easy Install:</p>
+<div class="highlight-python"><div class="highlight"><pre>$ easy_install flask-s3
+</pre></div>
+</div>
+<div class="section" id="dependencies">
+<h3>Dependencies<a class="headerlink" href="#dependencies" title="Permalink to this headline">¶</a></h3>
+<p>Aside from the obvious dependency of Flask itself, Flask-S3 makes use of
+the <a class="reference external" href="http://docs.pythonboto.org/en/latest/">boto</a> library for uploading assets to Amazon S3. <strong>Note</strong>:
+Flask-S3 currently only supports applications that use the <a class="reference external" href="http://jinja.pocoo.org/docs/">jinja2</a>
+templating system.</p>
+</div>
+</div>
+<div class="section" id="using-flask-s3">
+<h2>Using Flask-S3<a class="headerlink" href="#using-flask-s3" title="Permalink to this headline">¶</a></h2>
+<p>Flask-S3 is incredibly simple to use. In order to start serving your
+Flask application&#8217;s assets from Amazon S3, the first thing to do is let
+Flask-S3 know about your <a class="reference external" href="http://flask.pocoo.org/docs/api/#flask.Flask" title="(in Flask v1.0-dev)"><tt class="xref py py-class docutils literal"><span class="pre">flask.Flask</span></tt></a> application object.</p>
+<div class="highlight-python"><div class="highlight"><pre><span class="kn">from</span> <span class="nn">flask</span> <span class="kn">import</span> <span class="n">Flask</span>
+<span class="kn">from</span> <span class="nn">flask_s3</span> <span class="kn">import</span> <span class="n">FlaskS3</span>
+
+<span class="n">app</span> <span class="o">=</span> <span class="n">Flask</span><span class="p">(</span><span class="n">__name__</span><span class="p">)</span>
+<span class="n">app</span><span class="o">.</span><span class="n">config</span><span class="p">[</span><span class="s">&#39;S3_BUCKET_NAME&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="s">&#39;mybucketname&#39;</span>
+<span class="n">s3</span> <span class="o">=</span> <span class="n">FlaskS3</span><span class="p">(</span><span class="n">app</span><span class="p">)</span>
+</pre></div>
+</div>
+<p>In many cases, however, one cannot expect a Flask instance to be ready
+at import time, and a common pattern is to return a Flask instance from
+within a function only after other configuration details have been taken
+care of. In these cases, Flask-S3 provides a simple function,
+<tt class="docutils literal"><span class="pre">init_app</span></tt>, which takes your application as an argument.</p>
+<div class="highlight-python"><div class="highlight"><pre><span class="kn">from</span> <span class="nn">flask</span> <span class="kn">import</span> <span class="n">Flask</span>
+<span class="kn">from</span> <span class="nn">flask_s3</span> <span class="kn">import</span> <span class="n">FlaskS3</span>
+
+<span class="n">s3</span> <span class="o">=</span> <span class="n">FlaskS3</span><span class="p">()</span>
+
+<span class="k">def</span> <span class="nf">start_app</span><span class="p">():</span>
+    <span class="n">app</span> <span class="o">=</span> <span class="n">Flask</span><span class="p">(</span><span class="n">__name__</span><span class="p">)</span>
+    <span class="n">s3</span><span class="o">.</span><span class="n">init_app</span><span class="p">(</span><span class="n">app</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">app</span>
+</pre></div>
+</div>
+<p>In terms of getting your application to use external Amazon S3 URLs when
+referring to your application&#8217;s static assets, passing your <tt class="docutils literal"><span class="pre">Flask</span></tt>
+object to the <tt class="docutils literal"><span class="pre">FlaskS3</span></tt> object is all that needs to be done. Once your
+app is running, any templates that contained relative static asset
+locations, will instead contain hosted counterparts on Amazon S3.</p>
+<div class="section" id="uploading-your-static-assets">
+<h3>Uploading your Static Assets<a class="headerlink" href="#uploading-your-static-assets" title="Permalink to this headline">¶</a></h3>
+<p>You only need to upload your static assets to Amazon S3 once. Of course,
+if you add or modify your existing assets then you will need to repeat
+the uploading process.</p>
+<p>Uploading your static assets from a Python console is as simple as
+follows.</p>
+<div class="highlight-python"><div class="highlight"><pre><span class="gp">&gt;&gt;&gt; </span><span class="kn">import</span> <span class="nn">flask_s3</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="kn">from</span> <span class="nn">my_application</span> <span class="kn">import</span> <span class="n">app</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">flask_s3</span><span class="o">.</span><span class="n">create_all</span><span class="p">(</span><span class="n">app</span><span class="p">)</span>
+<span class="go">&gt;&gt;&gt;</span>
+</pre></div>
+</div>
+<p>Flask-S3 will proceed to walk through your application&#8217;s static assets,
+including those belonging to <em>registered</em> <a class="reference external" href="http://flask.pocoo.org/docs/blueprints/">blueprints</a>, and upload them
+to your Amazon S3 bucket.</p>
+<div class="section" id="static-asset-urls">
+<h4>Static Asset URLs<a class="headerlink" href="#static-asset-urls" title="Permalink to this headline">¶</a></h4>
+<p>Within your bucket on S3, Flask-S3 replicates the static file hierarchy
+defined in your application object and any registered blueprints. URLs
+generated by Flask-S3 will look like the following:</p>
+<p><tt class="docutils literal"><span class="pre">/static/foo/style.css</span></tt> becomes
+<tt class="docutils literal"><span class="pre">https://mybucketname.s3.amazonaws.com/static/foo/style.css</span></tt>, assuming
+that <tt class="docutils literal"><span class="pre">mybucketname</span></tt> is the name of your S3 bucket, and you have chosen
+to have assets served over HTTPS.</p>
+</div>
+<div class="section" id="setting-custom-http-headers">
+<h4>Setting Custom HTTP Headers<a class="headerlink" href="#setting-custom-http-headers" title="Permalink to this headline">¶</a></h4>
+<p>To set custom HTTP headers on the files served from S3 specify what
+headers you want to use with the <tt class="xref py py-obj docutils literal"><span class="pre">S3_HEADERS</span></tt> option.</p>
+<div class="highlight-python"><div class="highlight"><pre><span class="n">S3_HEADERS</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="s">&#39;Expires&#39;</span><span class="p">:</span> <span class="s">&#39;Thu, 15 Apr 2010 20:00:00 GMT&#39;</span><span class="p">,</span>
+    <span class="s">&#39;Cache-Control&#39;</span><span class="p">:</span> <span class="s">&#39;max-age=86400&#39;</span><span class="p">,</span>
+<span class="p">}</span>
+</pre></div>
+</div>
+<p>See <a class="reference external" href="http://developer.yahoo.com/performance/rules.html#expires">Yahoo!</a> more information on how to set good values for your headers.</p>
+</div>
+</div>
+<div class="section" id="flask-s3-options">
+<span id="configuration"></span><span id="settings"></span><h3>Flask-S3 Options<a class="headerlink" href="#flask-s3-options" title="Permalink to this headline">¶</a></h3>
+<p>Within your Flask application&#8217;s settings you can provide the following
+settings to control the behaviour of Flask-S3. None of the settings are
+required, but if not present, some will need to be provided when
+uploading assets to S3.</p>
+<table border="1" class="docutils">
+<colgroup>
+<col width="34%" />
+<col width="66%" />
+</colgroup>
+<tbody valign="top">
+<tr class="row-odd"><td><tt class="xref py py-obj docutils literal"><span class="pre">AWS_ACCESS_KEY_ID</span></tt></td>
+<td>Your AWS access key. This does not need to be
+stored in your configuration if you choose to pass
+it directly when uploading your assets.</td>
+</tr>
+<tr class="row-even"><td><tt class="xref py py-obj docutils literal"><span class="pre">AWS_SECRET_ACCESS_KEY</span></tt></td>
+<td>Your AWS secret key. As with the access key, this
+need not be stored in your configuration if passed
+in to <a class="reference internal" href="#flask_s3.create_all" title="flask_s3.create_all"><tt class="xref py py-obj docutils literal"><span class="pre">create_all</span></tt></a>.</td>
+</tr>
+<tr class="row-odd"><td><tt class="xref py py-obj docutils literal"><span class="pre">S3_BUCKET_DOMAIN</span></tt></td>
+<td>The domain part of the URI for your S3 bucket. You
+probably won&#8217;t need to change this.
+<strong>Default:</strong> <tt class="docutils literal"><span class="pre">u's3.amazonaws.com'</span></tt></td>
+</tr>
+<tr class="row-even"><td><tt class="xref py py-obj docutils literal"><span class="pre">S3_CDN_DOMAIN</span></tt></td>
+<td>AWS makes it easy to attach CloudFront to an S3
+bucket. If you want to use this or another CDN,
+set the base domain here. This is distinct from the
+<tt class="xref py py-obj docutils literal"><span class="pre">S3_BUCKET_DOMAIN</span></tt> since it will not include the
+bucket name in the base url.</td>
+</tr>
+<tr class="row-odd"><td><tt class="xref py py-obj docutils literal"><span class="pre">S3_BUCKET_NAME</span></tt></td>
+<td>The desired name for your Amazon S3 bucket. Note:
+the name will be visible in all your assets&#8217; URLs.</td>
+</tr>
+<tr class="row-even"><td><tt class="xref py py-obj docutils literal"><span class="pre">USE_S3</span></tt></td>
+<td>This setting allows you to toggle whether Flask-S3
+is active or not. When set to <a class="reference external" href="http://docs.python.org/library/constants.html#False" title="(in Python v2.7)"><tt class="xref py py-obj docutils literal"><span class="pre">False</span></tt></a> your
+application&#8217;s templates will revert to including
+static asset locations determined by
+<a class="reference external" href="http://flask.pocoo.org/docs/api/#flask.url_for" title="(in Flask v1.0-dev)"><tt class="xref py py-obj docutils literal"><span class="pre">flask.url_for</span></tt></a>.
+<strong>Default:</strong> <a class="reference external" href="http://docs.python.org/library/constants.html#True" title="(in Python v2.7)"><tt class="xref py py-obj docutils literal"><span class="pre">True</span></tt></a>
+<strong>Note</strong>: if you run your application in <a class="reference external" href="http://flask.pocoo.org/docs/config/#configuration-basics">debug</a>
+mode (and <tt class="xref py py-obj docutils literal"><span class="pre">USE_S3_DEBUG</span></tt> is <a class="reference external" href="http://docs.python.org/library/constants.html#False" title="(in Python v2.7)"><tt class="xref py py-obj docutils literal"><span class="pre">False</span></tt></a> - see next
+item), <tt class="xref py py-obj docutils literal"><span class="pre">USE_S3</span></tt> will be changed to <a class="reference external" href="http://docs.python.org/library/constants.html#False" title="(in Python v2.7)"><tt class="xref py py-obj docutils literal"><span class="pre">False</span></tt></a>. This
+allows the <tt class="xref py py-obj docutils literal"><span class="pre">USE_S3</span></tt> config variable to be the
+definitive check as to whether <a class="reference internal" href="#flask_s3.url_for" title="flask_s3.url_for"><tt class="xref py py-obj docutils literal"><span class="pre">flask_s3.url_for</span></tt></a>
+is overriding <a class="reference external" href="http://flask.pocoo.org/docs/api/#flask.url_for" title="(in Flask v1.0-dev)"><tt class="xref py py-obj docutils literal"><span class="pre">flask.url_for</span></tt></a>.</td>
+</tr>
+<tr class="row-odd"><td><tt class="xref py py-obj docutils literal"><span class="pre">USE_S3_DEBUG</span></tt></td>
+<td>By default, Flask-S3 will be switched off when
+running your application in <a class="reference external" href="http://flask.pocoo.org/docs/config/#configuration-basics">debug</a> mode, so that
+your templates include static asset locations
+specified by <a class="reference external" href="http://flask.pocoo.org/docs/api/#flask.url_for" title="(in Flask v1.0-dev)"><tt class="xref py py-obj docutils literal"><span class="pre">flask.url_for</span></tt></a>. If you wish to enable
+Flask-S3 in debug mode, set this value to <a class="reference external" href="http://docs.python.org/library/constants.html#True" title="(in Python v2.7)"><tt class="xref py py-obj docutils literal"><span class="pre">True</span></tt></a>.
+<strong>Note</strong>: if <tt class="xref py py-obj docutils literal"><span class="pre">USE_S3</span></tt> is set to <a class="reference external" href="http://docs.python.org/library/constants.html#False" title="(in Python v2.7)"><tt class="xref py py-obj docutils literal"><span class="pre">False</span></tt></a> then
+templates will always include asset locations
+specified by <a class="reference external" href="http://flask.pocoo.org/docs/api/#flask.url_for" title="(in Flask v1.0-dev)"><tt class="xref py py-obj docutils literal"><span class="pre">flask.url_for</span></tt></a>.</td>
+</tr>
+<tr class="row-even"><td><tt class="xref py py-obj docutils literal"><span class="pre">S3_URL_SCHEME</span></tt></td>
+<td>URL scheme (<tt class="docutils literal"><span class="pre">http</span></tt> or <tt class="docutils literal"><span class="pre">https</span></tt>) to follow
+by the reset of URL.  By default, it makes the
+url scheme context depended
+e.g. <tt class="docutils literal"><span class="pre">//domain.com/path.jpg</span></tt>.</td>
+</tr>
+<tr class="row-odd"><td><tt class="xref py py-obj docutils literal"><span class="pre">USE_GZIP</span></tt></td>
+<td>Whether to gzip files.
+<strong>Default:</strong> <a class="reference external" href="http://docs.python.org/library/constants.html#False" title="(in Python v2.7)"><tt class="xref py py-obj docutils literal"><span class="pre">False</span></tt></a></td>
+</tr>
+<tr class="row-even"><td><tt class="xref py py-obj docutils literal"><span class="pre">S3_GZIP_CONTENT_TYPES</span></tt></td>
+<td>Mimetypes to gzip.
+<strong>Default:</strong> <em class="mimetype">text/css</em>,
+<em class="mimetype">application/javascript</em>,
+<em class="mimetype">application/x-javascript</em></td>
+</tr>
+<tr class="row-odd"><td><tt class="xref py py-obj docutils literal"><span class="pre">S3_HEADERS</span></tt></td>
+<td>Sets custom headers to be sent with each file to S3.
+<strong>Default:</strong> <tt class="xref py py-obj docutils literal"><span class="pre">{}</span></tt></td>
+</tr>
+<tr class="row-even"><td><tt class="xref py py-obj docutils literal"><span class="pre">S3_CACHE_CONTROL</span></tt></td>
+<td><strong>Deprecated</strong>. Please use <tt class="xref py py-obj docutils literal"><span class="pre">S3_HEADERS</span></tt> instead.</td>
+</tr>
+<tr class="row-odd"><td><tt class="xref py py-obj docutils literal"><span class="pre">S3_USE_CACHE_CONTROL</span></tt></td>
+<td><strong>Deprecated</strong>. Please use <tt class="xref py py-obj docutils literal"><span class="pre">S3_HEADERS</span></tt> instead.</td>
+</tr>
+<tr class="row-even"><td><tt class="xref py py-obj docutils literal"><span class="pre">S3_USE_HTTPS</span></tt></td>
+<td><strong>Deprecated</strong>. Please use <tt class="xref py py-obj docutils literal"><span class="pre">S3_URL_SCHEME</span></tt> instead.</td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+<div class="section" id="api-documentation">
+<h2>API Documentation<a class="headerlink" href="#api-documentation" title="Permalink to this headline">¶</a></h2>
+<p>Flask-S3 is a very simple extension. The few exposed objects, methods
+and functions are as follows.</p>
+<div class="section" id="the-flasks3-object">
+<h3>The FlaskS3 Object<a class="headerlink" href="#the-flasks3-object" title="Permalink to this headline">¶</a></h3>
+<dl class="class">
+<dt id="flask_s3.FlaskS3">
+<em class="property">class </em><tt class="descclassname">flask_s3.</tt><tt class="descname">FlaskS3</tt><big>(</big><em>app=None</em><big>)</big><a class="reference internal" href="_modules/flask_s3.html#FlaskS3"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#flask_s3.FlaskS3" title="Permalink to this definition">¶</a></dt>
+<dd><p>The FlaskS3 object allows your application to use Flask-S3.</p>
+<p>When initialising a FlaskS3 object you may optionally provide your 
+<a class="reference external" href="http://flask.pocoo.org/docs/api/#flask.Flask" title="(in Flask v1.0-dev)"><tt class="xref py py-class docutils literal"><span class="pre">flask.Flask</span></tt></a> application object if it is ready. Otherwise, 
+you may provide it later by using the <a class="reference internal" href="#flask_s3.FlaskS3.init_app" title="flask_s3.FlaskS3.init_app"><tt class="xref py py-meth docutils literal"><span class="pre">init_app()</span></tt></a> method.</p>
+<table class="docutils field-list" frame="void" rules="none">
+<col class="field-name" />
+<col class="field-body" />
+<tbody valign="top">
+<tr class="field-odd field"><th class="field-name">Parameters:</th><td class="field-body"><strong>app</strong> (<a class="reference external" href="http://flask.pocoo.org/docs/api/#flask.Flask" title="(in Flask v1.0-dev)"><tt class="xref py py-class docutils literal"><span class="pre">flask.Flask</span></tt></a> or None) &#8211; optional <a class="reference external" href="http://flask.pocoo.org/docs/api/#flask.Flask" title="(in Flask v1.0-dev)"><tt class="xref py py-class docutils literal"><span class="pre">flask.Flask</span></tt></a> application object</td>
+</tr>
+</tbody>
+</table>
+<dl class="method">
+<dt id="flask_s3.FlaskS3.init_app">
+<tt class="descname">init_app</tt><big>(</big><em>app</em><big>)</big><a class="reference internal" href="_modules/flask_s3.html#FlaskS3.init_app"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#flask_s3.FlaskS3.init_app" title="Permalink to this definition">¶</a></dt>
+<dd><p>An alternative way to pass your <a class="reference external" href="http://flask.pocoo.org/docs/api/#flask.Flask" title="(in Flask v1.0-dev)"><tt class="xref py py-class docutils literal"><span class="pre">flask.Flask</span></tt></a> application
+object to Flask-S3. <a class="reference internal" href="#flask_s3.FlaskS3.init_app" title="flask_s3.FlaskS3.init_app"><tt class="xref py py-meth docutils literal"><span class="pre">init_app()</span></tt></a> also takes care of some 
+default <a class="reference internal" href="#settings">settings</a>.</p>
+<table class="docutils field-list" frame="void" rules="none">
+<col class="field-name" />
+<col class="field-body" />
+<tbody valign="top">
+<tr class="field-odd field"><th class="field-name">Parameters:</th><td class="field-body"><strong>app</strong> &#8211; the <a class="reference external" href="http://flask.pocoo.org/docs/api/#flask.Flask" title="(in Flask v1.0-dev)"><tt class="xref py py-class docutils literal"><span class="pre">flask.Flask</span></tt></a> application object.</td>
+</tr>
+</tbody>
+</table>
+</dd></dl>
+
+</dd></dl>
+
+</div>
+<div class="section" id="s3-interaction">
+<h3>S3 Interaction<a class="headerlink" href="#s3-interaction" title="Permalink to this headline">¶</a></h3>
+<dl class="function">
+<dt id="flask_s3.create_all">
+<tt class="descclassname">flask_s3.</tt><tt class="descname">create_all</tt><big>(</big><em>app</em>, <em>user=None</em>, <em>password=None</em>, <em>bucket_name=None</em>, <em>location=''</em>, <em>include_hidden=False</em>, <em>force_refresh=False</em><big>)</big><a class="reference internal" href="_modules/flask_s3.html#create_all"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#flask_s3.create_all" title="Permalink to this definition">¶</a></dt>
+<dd><p>Uploads of the static assets associated with a Flask application to 
+Amazon S3.</p>
+<p>All static assets are identified on the local filesystem, including 
+any static assets associated with <em>registered</em> blueprints. In turn, 
+each asset is uploaded to the bucket described by <tt class="xref py py-obj docutils literal"><span class="pre">bucket_name</span></tt>. If 
+the bucket does not exist then it is created.</p>
+<p>Flask-S3 creates the same relative static asset folder structure on
+S3 as can be found within your Flask application.</p>
+<p>Many of the optional arguments to <a class="reference internal" href="#flask_s3.create_all" title="flask_s3.create_all"><tt class="xref py py-obj docutils literal"><span class="pre">create_all</span></tt></a> can be specified
+instead in your application&#8217;s configuration using the Flask-S3
+<a class="reference internal" href="#configuration">configuration</a> variables.</p>
+<table class="docutils field-list" frame="void" rules="none">
+<col class="field-name" />
+<col class="field-body" />
+<tbody valign="top">
+<tr class="field-odd field"><th class="field-name">Parameters:</th><td class="field-body"><ul class="first last simple">
+<li><strong>app</strong> &#8211; a <a class="reference external" href="http://flask.pocoo.org/docs/api/#flask.Flask" title="(in Flask v1.0-dev)"><tt class="xref py py-class docutils literal"><span class="pre">flask.Flask</span></tt></a> application object.</li>
+<li><strong>user</strong> (<a class="reference external" href="http://docs.python.org/library/functions.html#basestring" title="(in Python v2.7)"><tt class="xref py py-obj docutils literal"><span class="pre">basestring</span></tt></a> or None) &#8211; an AWS Access Key ID. You can find this key in the
+Security Credentials section of your AWS account.</li>
+<li><strong>password</strong> (<a class="reference external" href="http://docs.python.org/library/functions.html#basestring" title="(in Python v2.7)"><tt class="xref py py-obj docutils literal"><span class="pre">basestring</span></tt></a> or None) &#8211; an AWS Secret Access Key. You can find this key in
+the Security Credentials section of your AWS 
+account.</li>
+<li><strong>bucket_name</strong> (<a class="reference external" href="http://docs.python.org/library/functions.html#basestring" title="(in Python v2.7)"><tt class="xref py py-obj docutils literal"><span class="pre">basestring</span></tt></a> or None) &#8211; the name of the bucket you wish to server your
+static assets from. <strong>Note</strong>: while a valid 
+character, it is recommended that you do not 
+include periods in bucket_name if you wish to 
+serve over HTTPS. See Amazon&#8217;s <a class="reference external" href="http://docs.amazonwebservices.com/AmazonS3/latest/dev/BucketRestrictions.html">bucket
+restrictions</a> for more details.</li>
+<li><strong>location</strong> (<a class="reference external" href="http://docs.python.org/library/functions.html#basestring" title="(in Python v2.7)"><tt class="xref py py-obj docutils literal"><span class="pre">basestring</span></tt></a> or None) &#8211; the AWS region to host the bucket in; an empty
+string indicates the default region should be used,
+which is the US Standard region. Possible location 
+values include: <tt class="xref py py-obj docutils literal"><span class="pre">'DEFAULT'</span></tt>, <tt class="xref py py-obj docutils literal"><span class="pre">'EU'</span></tt>, <tt class="xref py py-obj docutils literal"><span class="pre">'USWest'</span></tt>, 
+<tt class="xref py py-obj docutils literal"><span class="pre">'APSoutheast'</span></tt></li>
+<li><strong>include_hidden</strong> (<a class="reference external" href="http://docs.python.org/library/functions.html#bool" title="(in Python v2.7)"><tt class="xref py py-obj docutils literal"><span class="pre">bool</span></tt></a>) &#8211; by default Flask-S3 will not upload hidden
+files. Set this to true to force the upload of hidden files.</li>
+</ul>
+</td>
+</tr>
+</tbody>
+</table>
+</dd></dl>
+
+<dl class="function">
+<dt id="flask_s3.url_for">
+<tt class="descclassname">flask_s3.</tt><tt class="descname">url_for</tt><big>(</big><em>endpoint</em>, <em>**values</em><big>)</big><a class="reference internal" href="_modules/flask_s3.html#url_for"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#flask_s3.url_for" title="Permalink to this definition">¶</a></dt>
+<dd><p>Generates a URL to the given endpoint.</p>
+<p>If the endpoint is for a static resource then an Amazon S3 URL is 
+generated, otherwise the call is passed on to <a class="reference external" href="http://flask.pocoo.org/docs/api/#flask.url_for" title="(in Flask v1.0-dev)"><tt class="xref py py-obj docutils literal"><span class="pre">flask.url_for</span></tt></a>.</p>
+<p>Because this function is set as a jinja environment variable when 
+<a class="reference internal" href="#flask_s3.FlaskS3.init_app" title="flask_s3.FlaskS3.init_app"><tt class="xref py py-obj docutils literal"><span class="pre">FlaskS3.init_app</span></tt></a> is invoked, this function replaces 
+<a class="reference external" href="http://flask.pocoo.org/docs/api/#flask.url_for" title="(in Flask v1.0-dev)"><tt class="xref py py-obj docutils literal"><span class="pre">flask.url_for</span></tt></a> in templates automatically. It is unlikely that this
+function will need to be directly called from within your 
+application code, unless you need to refer to static assets outside 
+of your templates.</p>
+</dd></dl>
+
+</div>
+</div>
+</div>
+
+
+          </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+  
+    <a href="http://github.com/e-dard/flask-s3"><img style="position: fixed; top: 0; right: 0; border: 0;"
+    src="http://s3.amazonaws.com/github/ribbons/forkme_right_darkblue_121621.png" alt="Fork me on GitHub" /></a>
+  
+
+  
+  </div>
+  
+
+  </body>
+</html>

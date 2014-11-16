@@ -1,0 +1,366 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+  "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    
+    <title>flask_s3 &mdash; flask-S3 0.1 documentation</title>
+    
+    <link rel="stylesheet" href="../_static/flasky.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    
+    <script type="text/javascript">
+      var DOCUMENTATION_OPTIONS = {
+        URL_ROOT:    '../',
+        VERSION:     '0.1',
+        COLLAPSE_INDEX: false,
+        FILE_SUFFIX: '.html',
+        HAS_SOURCE:  true
+      };
+    </script>
+    <script type="text/javascript" src="../_static/jquery.js"></script>
+    <script type="text/javascript" src="../_static/underscore.js"></script>
+    <script type="text/javascript" src="../_static/doctools.js"></script>
+    <link rel="top" title="flask-S3 0.1 documentation" href="../index.html" />
+    <link rel="up" title="Module code" href="index.html" /> 
+  </head>
+  <body>
+  
+  
+
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          <div class="body">
+            
+  <h1>Source code for flask_s3</h1><div class="highlight"><pre>
+<span class="kn">from</span> <span class="nn">concurrent.futures</span> <span class="kn">import</span> <span class="n">ThreadPoolExecutor</span>
+<span class="kn">import</span> <span class="nn">os</span>
+<span class="kn">import</span> <span class="nn">re</span>
+<span class="kn">import</span> <span class="nn">gzip</span>
+<span class="k">try</span><span class="p">:</span>
+    <span class="kn">from</span> <span class="nn">cStringIO</span> <span class="kn">import</span> <span class="n">StringIO</span>
+<span class="k">except</span> <span class="ne">ImportError</span><span class="p">:</span>
+    <span class="kn">from</span> <span class="nn">StringIO</span> <span class="kn">import</span> <span class="n">StringIO</span>
+<span class="kn">import</span> <span class="nn">logging</span>
+<span class="kn">import</span> <span class="nn">mimetypes</span>
+<span class="kn">from</span> <span class="nn">collections</span> <span class="kn">import</span> <span class="n">defaultdict</span>
+
+<span class="kn">from</span> <span class="nn">flask</span> <span class="kn">import</span> <span class="n">url_for</span> <span class="k">as</span> <span class="n">flask_url_for</span>
+<span class="kn">from</span> <span class="nn">flask</span> <span class="kn">import</span> <span class="n">current_app</span>
+<span class="kn">from</span> <span class="nn">boto.s3.connection</span> <span class="kn">import</span> <span class="n">S3Connection</span>
+<span class="kn">from</span> <span class="nn">boto.exception</span> <span class="kn">import</span> <span class="n">S3CreateError</span><span class="p">,</span> <span class="n">S3ResponseError</span>
+<span class="kn">from</span> <span class="nn">boto.s3.key</span> <span class="kn">import</span> <span class="n">Key</span>
+
+
+
+
+<span class="n">logger</span> <span class="o">=</span> <span class="n">logging</span><span class="o">.</span><span class="n">getLogger</span><span class="p">(</span><span class="s">&#39;flask_s3&#39;</span><span class="p">)</span>
+<span class="n">mimetypes</span><span class="o">.</span><span class="n">add_type</span><span class="p">(</span><span class="s">&#39;text/css&#39;</span><span class="p">,</span> <span class="s">&#39;.less&#39;</span><span class="p">)</span>
+
+
+<div class="viewcode-block" id="url_for"><a class="viewcode-back" href="../index.html#flask_s3.url_for">[docs]</a><span class="k">def</span> <span class="nf">url_for</span><span class="p">(</span><span class="n">endpoint</span><span class="p">,</span> <span class="o">**</span><span class="n">values</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Generates a URL to the given endpoint.</span>
+
+<span class="sd">    If the endpoint is for a static resource then an Amazon S3 URL is </span>
+<span class="sd">    generated, otherwise the call is passed on to `flask.url_for`.</span>
+
+<span class="sd">    Because this function is set as a jinja environment variable when </span>
+<span class="sd">    `FlaskS3.init_app` is invoked, this function replaces </span>
+<span class="sd">    `flask.url_for` in templates automatically. It is unlikely that this</span>
+<span class="sd">    function will need to be directly called from within your </span>
+<span class="sd">    application code, unless you need to refer to static assets outside </span>
+<span class="sd">    of your templates.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">app</span> <span class="o">=</span> <span class="n">current_app</span>
+    <span class="k">if</span> <span class="s">&#39;S3_BUCKET_NAME&#39;</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">app</span><span class="o">.</span><span class="n">config</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s">&quot;S3_BUCKET_NAME not found in app configuration.&quot;</span><span class="p">)</span>
+
+    <span class="k">if</span> <span class="n">app</span><span class="o">.</span><span class="n">debug</span> <span class="ow">and</span> <span class="ow">not</span> <span class="n">app</span><span class="o">.</span><span class="n">config</span><span class="p">[</span><span class="s">&#39;USE_S3_DEBUG&#39;</span><span class="p">]:</span>
+        <span class="k">return</span> <span class="n">flask_url_for</span><span class="p">(</span><span class="n">endpoint</span><span class="p">,</span> <span class="o">**</span><span class="n">values</span><span class="p">)</span>
+
+    <span class="k">if</span> <span class="n">endpoint</span> <span class="o">==</span> <span class="s">&#39;static&#39;</span> <span class="ow">or</span> <span class="n">endpoint</span><span class="o">.</span><span class="n">endswith</span><span class="p">(</span><span class="s">&#39;.static&#39;</span><span class="p">):</span>
+        <span class="n">scheme</span> <span class="o">=</span> <span class="s">&#39;http&#39;</span>
+        <span class="n">scheme</span> <span class="o">=</span> <span class="n">app</span><span class="o">.</span><span class="n">config</span><span class="p">[</span><span class="s">&#39;S3_URL_SCHEME&#39;</span><span class="p">]</span> <span class="ow">or</span> <span class="s">&#39;https&#39;</span>
+        <span class="n">bucket_path</span> <span class="o">=</span> <span class="s">&#39;</span><span class="si">%s</span><span class="s">.</span><span class="si">%s</span><span class="s">&#39;</span> <span class="o">%</span> <span class="p">(</span><span class="n">app</span><span class="o">.</span><span class="n">config</span><span class="p">[</span><span class="s">&#39;S3_BUCKET_NAME&#39;</span><span class="p">],</span>
+                                 <span class="n">app</span><span class="o">.</span><span class="n">config</span><span class="p">[</span><span class="s">&#39;S3_BUCKET_DOMAIN&#39;</span><span class="p">])</span>
+        <span class="k">if</span> <span class="n">app</span><span class="o">.</span><span class="n">config</span><span class="p">[</span><span class="s">&#39;S3_CDN_DOMAIN&#39;</span><span class="p">]:</span>
+            <span class="n">bucket_path</span> <span class="o">=</span> <span class="s">&#39;</span><span class="si">%s</span><span class="s">&#39;</span> <span class="o">%</span> <span class="n">app</span><span class="o">.</span><span class="n">config</span><span class="p">[</span><span class="s">&#39;S3_CDN_DOMAIN&#39;</span><span class="p">]</span>
+        <span class="k">if</span> <span class="n">app</span><span class="o">.</span><span class="n">config</span><span class="p">[</span><span class="s">&#39;S3_PREFIX&#39;</span><span class="p">]:</span>
+            <span class="n">bucket_path</span> <span class="o">=</span> <span class="s">&quot;/&quot;</span><span class="o">.</span><span class="n">join</span><span class="p">((</span><span class="n">bucket_path</span><span class="p">,</span> <span class="n">app</span><span class="o">.</span><span class="n">config</span><span class="p">[</span><span class="s">&#39;S3_PREFIX&#39;</span><span class="p">]))</span>
+        <span class="n">urls</span> <span class="o">=</span> <span class="n">app</span><span class="o">.</span><span class="n">url_map</span><span class="o">.</span><span class="n">bind</span><span class="p">(</span><span class="n">bucket_path</span><span class="p">,</span> <span class="n">url_scheme</span><span class="o">=</span><span class="n">scheme</span><span class="p">)</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">mimetype</span> <span class="o">=</span> <span class="n">mimetypes</span><span class="o">.</span><span class="n">guess_type</span><span class="p">(</span><span class="n">values</span><span class="p">[</span><span class="s">&#39;filename&#39;</span><span class="p">])[</span><span class="mi">0</span><span class="p">]</span>
+        <span class="k">except</span> <span class="ne">KeyError</span><span class="p">:</span>
+            <span class="n">mimetype</span> <span class="o">=</span> <span class="bp">None</span>
+        <span class="k">if</span> <span class="p">(</span><span class="n">mimetype</span> <span class="ow">in</span> <span class="n">app</span><span class="o">.</span><span class="n">config</span><span class="p">[</span><span class="s">&#39;S3_GZIP_CONTENT_TYPES&#39;</span><span class="p">])</span> \
+            <span class="ow">and</span> <span class="n">app</span><span class="o">.</span><span class="n">config</span><span class="p">[</span><span class="s">&#39;USE_GZIP&#39;</span><span class="p">]:</span>
+            <span class="n">values</span><span class="p">[</span><span class="s">&#39;filename&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="s">&quot;</span><span class="si">%s</span><span class="s">.gz&quot;</span> <span class="o">%</span> <span class="n">values</span><span class="p">[</span><span class="s">&#39;filename&#39;</span><span class="p">]</span> 
+        <span class="n">url</span> <span class="o">=</span> <span class="n">urls</span><span class="o">.</span><span class="n">build</span><span class="p">(</span><span class="n">endpoint</span><span class="p">,</span> <span class="n">values</span><span class="o">=</span><span class="n">values</span><span class="p">,</span> <span class="n">force_external</span><span class="o">=</span><span class="bp">True</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">app</span><span class="o">.</span><span class="n">config</span><span class="p">[</span><span class="s">&#39;S3_URL_SCHEME&#39;</span><span class="p">]</span> <span class="ow">is</span> <span class="bp">None</span><span class="p">:</span>
+            <span class="n">url</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">sub</span><span class="p">(</span><span class="s">r&#39;^https://&#39;</span><span class="p">,</span> <span class="s">&#39;//&#39;</span><span class="p">,</span> <span class="n">url</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">url</span>
+    <span class="k">return</span> <span class="n">flask_url_for</span><span class="p">(</span><span class="n">endpoint</span><span class="p">,</span> <span class="o">**</span><span class="n">values</span><span class="p">)</span>
+
+</div>
+<span class="k">def</span> <span class="nf">_bp_static_url</span><span class="p">(</span><span class="n">blueprint</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot; builds the absolute url path for a blueprint&#39;s static folder &quot;&quot;&quot;</span>
+    <span class="n">u</span> <span class="o">=</span> <span class="s">u&#39;</span><span class="si">%s%s</span><span class="s">&#39;</span> <span class="o">%</span> <span class="p">(</span><span class="n">blueprint</span><span class="o">.</span><span class="n">url_prefix</span> <span class="ow">or</span> <span class="s">&#39;&#39;</span><span class="p">,</span> <span class="n">blueprint</span><span class="o">.</span><span class="n">static_url_path</span> <span class="ow">or</span> <span class="s">&#39;&#39;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">u</span>
+
+
+<span class="k">def</span> <span class="nf">_gather_files</span><span class="p">(</span><span class="n">app</span><span class="p">,</span> <span class="n">hidden</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot; Gets all files in static folders and returns in dict.&quot;&quot;&quot;</span>
+    <span class="n">dirs</span> <span class="o">=</span> <span class="p">[(</span><span class="nb">unicode</span><span class="p">(</span><span class="n">app</span><span class="o">.</span><span class="n">static_folder</span><span class="p">),</span> <span class="n">app</span><span class="o">.</span><span class="n">static_url_path</span><span class="p">)]</span>
+    <span class="k">if</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">app</span><span class="p">,</span> <span class="s">&#39;blueprints&#39;</span><span class="p">):</span>
+        <span class="n">blueprints</span> <span class="o">=</span> <span class="n">app</span><span class="o">.</span><span class="n">blueprints</span><span class="o">.</span><span class="n">values</span><span class="p">()</span>
+        <span class="n">bp_details</span> <span class="o">=</span> <span class="k">lambda</span> <span class="n">x</span><span class="p">:</span> <span class="p">(</span><span class="n">x</span><span class="o">.</span><span class="n">static_folder</span><span class="p">,</span> <span class="n">_bp_static_url</span><span class="p">(</span><span class="n">x</span><span class="p">))</span>
+        <span class="n">dirs</span><span class="o">.</span><span class="n">extend</span><span class="p">([</span><span class="n">bp_details</span><span class="p">(</span><span class="n">x</span><span class="p">)</span> <span class="k">for</span> <span class="n">x</span> <span class="ow">in</span> <span class="n">blueprints</span> <span class="k">if</span> <span class="n">x</span><span class="o">.</span><span class="n">static_folder</span><span class="p">])</span>
+
+    <span class="n">valid_files</span> <span class="o">=</span> <span class="n">defaultdict</span><span class="p">(</span><span class="nb">list</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">static_folder</span><span class="p">,</span> <span class="n">static_url_loc</span> <span class="ow">in</span> <span class="n">dirs</span><span class="p">:</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">isdir</span><span class="p">(</span><span class="n">static_folder</span><span class="p">):</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span><span class="s">&quot;WARNING - [</span><span class="si">%s</span><span class="s"> does not exist]&quot;</span> <span class="o">%</span> <span class="n">static_folder</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="s">&quot;Checking static folder: </span><span class="si">%s</span><span class="s">&quot;</span> <span class="o">%</span> <span class="n">static_folder</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">root</span><span class="p">,</span> <span class="n">_</span><span class="p">,</span> <span class="n">files</span> <span class="ow">in</span> <span class="n">os</span><span class="o">.</span><span class="n">walk</span><span class="p">(</span><span class="n">static_folder</span><span class="p">):</span>
+            <span class="n">files</span> <span class="o">=</span> <span class="p">[</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">root</span><span class="p">,</span> <span class="n">x</span><span class="p">)</span> \
+                     <span class="k">for</span> <span class="n">x</span> <span class="ow">in</span> <span class="n">files</span> <span class="k">if</span> <span class="n">hidden</span> <span class="ow">or</span> <span class="n">x</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">!=</span> <span class="s">&#39;.&#39;</span><span class="p">]</span>
+            <span class="k">if</span> <span class="n">files</span><span class="p">:</span>
+                <span class="n">valid_files</span><span class="p">[(</span><span class="n">static_folder</span><span class="p">,</span> <span class="n">static_url_loc</span><span class="p">)]</span><span class="o">.</span><span class="n">extend</span><span class="p">(</span><span class="n">files</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">valid_files</span>
+
+
+<span class="k">def</span> <span class="nf">_path_to_relative_url</span><span class="p">(</span><span class="n">path</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot; Converts a folder and filename into a ralative url path &quot;&quot;&quot;</span>
+    <span class="k">return</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">splitdrive</span><span class="p">(</span><span class="n">path</span><span class="p">)[</span><span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s">&#39;</span><span class="se">\\</span><span class="s">&#39;</span><span class="p">,</span> <span class="s">&#39;/&#39;</span><span class="p">)</span>
+
+
+<span class="k">def</span> <span class="nf">_static_folder_path</span><span class="p">(</span><span class="n">static_url</span><span class="p">,</span> <span class="n">static_folder</span><span class="p">,</span> <span class="n">static_asset</span><span class="p">,</span> <span class="n">prefix</span><span class="o">=</span><span class="s">&#39;&#39;</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot; </span>
+<span class="sd">    Returns a path to a file based on the static folder, and not on the </span>
+<span class="sd">    filesystem holding the file.</span>
+
+<span class="sd">    Returns a path relative to static_url for static_asset</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="c"># first get the asset path relative to the static folder. </span>
+    <span class="c"># static_asset is not simply a filename because it could be </span>
+    <span class="c"># sub-directory then file etc.</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">static_asset</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="n">static_folder</span><span class="p">):</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s">&quot;</span><span class="si">%s</span><span class="s"> startic asset must be under </span><span class="si">%s</span><span class="s"> static folder&quot;</span> <span class="o">%</span>
+                         <span class="p">(</span><span class="n">static_asset</span><span class="p">,</span> <span class="n">static_folder</span><span class="p">))</span>
+    <span class="n">rel_asset</span> <span class="o">=</span> <span class="n">static_asset</span><span class="p">[</span><span class="nb">len</span><span class="p">(</span><span class="n">static_folder</span><span class="p">):]</span>
+    <span class="c"># Now bolt the static url path and the relative asset location together</span>
+    <span class="n">key</span> <span class="o">=</span> <span class="s">u&#39;</span><span class="si">%s</span><span class="s">/</span><span class="si">%s</span><span class="s">&#39;</span> <span class="o">%</span> <span class="p">(</span><span class="n">static_url</span><span class="o">.</span><span class="n">rstrip</span><span class="p">(</span><span class="s">&#39;/&#39;</span><span class="p">),</span> <span class="n">rel_asset</span><span class="o">.</span><span class="n">lstrip</span><span class="p">(</span><span class="s">&#39;/&#39;</span><span class="p">))</span>
+    <span class="k">if</span> <span class="n">prefix</span><span class="p">:</span>
+        <span class="n">key</span> <span class="o">=</span> <span class="s">u&#39;</span><span class="si">%s</span><span class="s">/</span><span class="si">%s</span><span class="s">&#39;</span> <span class="o">%</span> <span class="p">(</span><span class="n">prefix</span><span class="p">,</span> <span class="n">key</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">key</span>
+
+
+<span class="k">def</span> <span class="nf">_write_files</span><span class="p">(</span><span class="n">app</span><span class="p">,</span> <span class="n">static_url_loc</span><span class="p">,</span> <span class="n">static_folder</span><span class="p">,</span> <span class="n">files</span><span class="p">,</span> <span class="n">bucket</span><span class="p">,</span>
+                 <span class="n">ex_keys</span><span class="o">=</span><span class="bp">None</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot; Writes all the files inside a static folder to S3. &quot;&quot;&quot;</span>
+    <span class="k">with</span> <span class="n">ThreadPoolExecutor</span><span class="p">(</span><span class="n">app</span><span class="o">.</span><span class="n">config</span><span class="p">[</span><span class="s">&#39;S3_UPLOAD_COCURRENCY&#39;</span><span class="p">])</span> <span class="k">as</span> <span class="n">executor</span><span class="p">:</span>
+        <span class="k">for</span> <span class="n">file_path</span> <span class="ow">in</span> <span class="n">files</span><span class="p">:</span>
+            <span class="n">asset_loc</span> <span class="o">=</span> <span class="n">_path_to_relative_url</span><span class="p">(</span><span class="n">file_path</span><span class="p">)</span>
+            <span class="n">key_name</span> <span class="o">=</span> <span class="n">_static_folder_path</span><span class="p">(</span><span class="n">static_url_loc</span><span class="p">,</span> <span class="n">static_folder</span><span class="p">,</span>
+                                           <span class="n">asset_loc</span><span class="p">,</span> <span class="n">app</span><span class="o">.</span><span class="n">config</span><span class="p">[</span><span class="s">&#39;S3_PREFIX&#39;</span><span class="p">])</span>
+            <span class="n">mimetype</span> <span class="o">=</span> <span class="n">mimetypes</span><span class="o">.</span><span class="n">guess_type</span><span class="p">(</span><span class="n">key_name</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span>
+            <span class="n">is_gzippable</span> <span class="o">=</span> <span class="n">mimetype</span> <span class="ow">in</span> <span class="n">app</span><span class="o">.</span><span class="n">config</span><span class="p">[</span><span class="s">&#39;S3_GZIP_CONTENT_TYPES&#39;</span><span class="p">]</span>
+            <span class="n">headers</span> <span class="o">=</span> <span class="n">app</span><span class="o">.</span><span class="n">config</span><span class="p">[</span><span class="s">&#39;S3_HEADERS&#39;</span><span class="p">]</span>
+            <span class="n">msg</span> <span class="o">=</span> <span class="s">&quot;Uploading </span><span class="si">%s</span><span class="s"> to </span><span class="si">%s</span><span class="s"> as </span><span class="si">%s</span><span class="s">&quot;</span> <span class="o">%</span> <span class="p">(</span><span class="n">file_path</span><span class="p">,</span> <span class="n">bucket</span><span class="p">,</span> <span class="n">key_name</span><span class="p">)</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="n">msg</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">ex_keys</span> <span class="ow">and</span> <span class="n">key_name</span> <span class="ow">in</span> <span class="n">ex_keys</span><span class="p">:</span>
+                <span class="n">logger</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="s">&quot;</span><span class="si">%s</span><span class="s"> excluded from upload&quot;</span> <span class="o">%</span> <span class="n">key_name</span><span class="p">)</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">do_gzip</span> <span class="o">=</span> <span class="n">app</span><span class="o">.</span><span class="n">config</span><span class="p">[</span><span class="s">&#39;USE_GZIP&#39;</span><span class="p">]</span> <span class="ow">and</span> <span class="n">is_gzippable</span>
+                <span class="c"># upload origin file</span>
+                <span class="n">executor</span><span class="o">.</span><span class="n">submit</span><span class="p">(</span><span class="n">_upload_file</span><span class="p">,</span> <span class="n">file_path</span><span class="p">,</span> <span class="n">bucket</span><span class="p">,</span> <span class="n">key_name</span><span class="p">,</span> <span class="n">headers</span><span class="p">)</span>
+                <span class="c"># upload gzipped file (if enabled)</span>
+                <span class="k">if</span> <span class="n">do_gzip</span><span class="p">:</span>
+                    <span class="n">gzip_key_name</span> <span class="o">=</span> <span class="s">&quot;</span><span class="si">%s</span><span class="s">.gz&quot;</span> <span class="o">%</span> <span class="n">key_name</span>
+                    <span class="n">executor</span><span class="o">.</span><span class="n">submit</span><span class="p">(</span><span class="n">_upload_file</span><span class="p">,</span> <span class="n">file_path</span><span class="p">,</span> <span class="n">bucket</span><span class="p">,</span> <span class="n">gzip_key_name</span><span class="p">,</span> <span class="n">headers</span><span class="p">,</span> <span class="bp">True</span><span class="p">)</span>
+
+<span class="k">def</span> <span class="nf">_upload_file</span><span class="p">(</span><span class="n">file_path</span><span class="p">,</span> <span class="n">bucket</span><span class="p">,</span> <span class="n">key_name</span><span class="p">,</span> <span class="n">headers</span><span class="o">=</span><span class="p">{},</span> <span class="n">do_gzip</span><span class="o">=</span><span class="bp">False</span><span class="p">):</span>
+    <span class="n">k</span> <span class="o">=</span> <span class="n">Key</span><span class="p">(</span><span class="n">bucket</span><span class="o">=</span><span class="n">bucket</span><span class="p">,</span> <span class="n">name</span><span class="o">=</span><span class="n">key_name</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">header</span><span class="p">,</span> <span class="n">value</span> <span class="ow">in</span> <span class="n">headers</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+        <span class="k">if</span> <span class="p">(</span><span class="n">header</span><span class="p">,</span> <span class="n">value</span><span class="p">)</span> <span class="o">!=</span> <span class="p">(</span><span class="s">&#39;Content-Encoding&#39;</span><span class="p">,</span> <span class="s">&#39;gzip&#39;</span><span class="p">):</span>
+            <span class="n">k</span><span class="o">.</span><span class="n">set_metadata</span><span class="p">(</span><span class="n">header</span><span class="p">,</span> <span class="n">value</span><span class="p">)</span>
+    <span class="n">mimetype</span> <span class="o">=</span> <span class="n">mimetypes</span><span class="o">.</span><span class="n">guess_type</span><span class="p">(</span><span class="n">file_path</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span>
+    <span class="k">if</span> <span class="n">mimetype</span><span class="p">:</span>
+        <span class="n">k</span><span class="o">.</span><span class="n">set_metadata</span><span class="p">(</span><span class="s">&#39;Content-Type&#39;</span><span class="p">,</span> <span class="n">mimetype</span><span class="p">)</span>
+    <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="n">file_path</span><span class="p">)</span> <span class="k">as</span> <span class="n">f</span><span class="p">:</span>
+        <span class="n">content</span> <span class="o">=</span> <span class="n">f</span><span class="o">.</span><span class="n">read</span><span class="p">()</span>
+        <span class="k">if</span> <span class="n">do_gzip</span><span class="p">:</span>
+            <span class="n">k</span><span class="o">.</span><span class="n">set_metadata</span><span class="p">(</span><span class="s">&#39;Content-Encoding&#39;</span><span class="p">,</span> <span class="s">&#39;gzip&#39;</span><span class="p">)</span>
+            <span class="n">gzipped</span> <span class="o">=</span> <span class="n">StringIO</span><span class="p">()</span>
+            <span class="k">with</span> <span class="n">gzip</span><span class="o">.</span><span class="n">GzipFile</span><span class="p">(</span><span class="n">fileobj</span><span class="o">=</span><span class="n">gzipped</span><span class="p">,</span> <span class="n">mode</span><span class="o">=</span><span class="s">&#39;w&#39;</span><span class="p">)</span> <span class="k">as</span> <span class="n">_gzip</span><span class="p">:</span>
+                <span class="n">_gzip</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="n">content</span><span class="p">)</span>
+            <span class="n">content</span> <span class="o">=</span> <span class="n">gzipped</span><span class="o">.</span><span class="n">getvalue</span><span class="p">()</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">k</span><span class="o">.</span><span class="n">set_contents_from_string</span><span class="p">(</span><span class="n">content</span><span class="p">)</span>
+    <span class="k">except</span> <span class="n">S3ResponseError</span><span class="p">:</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">do_gzip</span><span class="p">:</span>
+            <span class="n">k</span><span class="o">.</span><span class="n">set_contents_from_filename</span><span class="p">(</span><span class="n">file_path</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">raise</span>
+    <span class="n">k</span><span class="o">.</span><span class="n">make_public</span><span class="p">()</span>
+    <span class="k">return</span> <span class="n">k</span>
+
+<span class="k">def</span> <span class="nf">_upload_files</span><span class="p">(</span><span class="n">app</span><span class="p">,</span> <span class="n">files_</span><span class="p">,</span> <span class="n">bucket</span><span class="p">):</span>
+    <span class="k">for</span> <span class="p">(</span><span class="n">static_folder</span><span class="p">,</span> <span class="n">static_url</span><span class="p">),</span> <span class="n">names</span> <span class="ow">in</span> <span class="n">files_</span><span class="o">.</span><span class="n">iteritems</span><span class="p">():</span>
+        <span class="n">_write_files</span><span class="p">(</span><span class="n">app</span><span class="p">,</span> <span class="n">static_url</span><span class="p">,</span> <span class="n">static_folder</span><span class="p">,</span> <span class="n">names</span><span class="p">,</span> <span class="n">bucket</span><span class="p">)</span>
+
+
+<div class="viewcode-block" id="create_all"><a class="viewcode-back" href="../index.html#flask_s3.create_all">[docs]</a><span class="k">def</span> <span class="nf">create_all</span><span class="p">(</span><span class="n">app</span><span class="p">,</span> <span class="n">user</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span> <span class="n">password</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span> <span class="n">bucket_name</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span>
+               <span class="n">location</span><span class="o">=</span><span class="s">&#39;&#39;</span><span class="p">,</span> <span class="n">include_hidden</span><span class="o">=</span><span class="bp">False</span><span class="p">,</span> <span class="n">force_refresh</span><span class="o">=</span><span class="bp">False</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Uploads of the static assets associated with a Flask application to </span>
+<span class="sd">    Amazon S3.</span>
+
+<span class="sd">    All static assets are identified on the local filesystem, including </span>
+<span class="sd">    any static assets associated with *registered* blueprints. In turn, </span>
+<span class="sd">    each asset is uploaded to the bucket described by `bucket_name`. If </span>
+<span class="sd">    the bucket does not exist then it is created.</span>
+
+<span class="sd">    Flask-S3 creates the same relative static asset folder structure on</span>
+<span class="sd">    S3 as can be found within your Flask application.</span>
+
+<span class="sd">    Many of the optional arguments to `create_all` can be specified</span>
+<span class="sd">    instead in your application&#39;s configuration using the Flask-S3</span>
+<span class="sd">    `configuration`_ variables.</span>
+
+<span class="sd">    :param app: a :class:`flask.Flask` application object.</span>
+
+<span class="sd">    :param user: an AWS Access Key ID. You can find this key in the</span>
+<span class="sd">                 Security Credentials section of your AWS account.</span>
+<span class="sd">    :type user: `basestring` or None</span>
+
+<span class="sd">    :param password: an AWS Secret Access Key. You can find this key in</span>
+<span class="sd">                     the Security Credentials section of your AWS </span>
+<span class="sd">                     account.</span>
+<span class="sd">    :type password: `basestring` or None</span>
+<span class="sd">    </span>
+<span class="sd">    :param bucket_name: the name of the bucket you wish to server your</span>
+<span class="sd">                        static assets from. **Note**: while a valid </span>
+<span class="sd">                        character, it is recommended that you do not </span>
+<span class="sd">                        include periods in bucket_name if you wish to </span>
+<span class="sd">                        serve over HTTPS. See Amazon&#39;s `bucket</span>
+<span class="sd">                        restrictions`_ for more details.</span>
+<span class="sd">    :type bucket_name: `basestring` or None</span>
+
+<span class="sd">    :param location: the AWS region to host the bucket in; an empty</span>
+<span class="sd">                     string indicates the default region should be used,</span>
+<span class="sd">                     which is the US Standard region. Possible location </span>
+<span class="sd">                     values include: `&#39;DEFAULT&#39;`, `&#39;EU&#39;`, `&#39;USWest&#39;`, </span>
+<span class="sd">                     `&#39;APSoutheast&#39;`</span>
+<span class="sd">    :type location: `basestring` or None</span>
+
+<span class="sd">    :param include_hidden: by default Flask-S3 will not upload hidden</span>
+<span class="sd">        files. Set this to true to force the upload of hidden files.</span>
+<span class="sd">    :type include_hidden: `bool`</span>
+
+<span class="sd">    .. _bucket restrictions: http://docs.amazonwebservices.com/AmazonS3\</span>
+<span class="sd">    /latest/dev/BucketRestrictions.html</span>
+
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="n">user</span> <span class="ow">is</span> <span class="bp">None</span> <span class="ow">and</span> <span class="s">&#39;AWS_ACCESS_KEY_ID&#39;</span> <span class="ow">in</span> <span class="n">app</span><span class="o">.</span><span class="n">config</span><span class="p">:</span>
+        <span class="n">user</span> <span class="o">=</span> <span class="n">app</span><span class="o">.</span><span class="n">config</span><span class="p">[</span><span class="s">&#39;AWS_ACCESS_KEY_ID&#39;</span><span class="p">]</span>
+    <span class="k">if</span> <span class="n">password</span> <span class="ow">is</span> <span class="bp">None</span> <span class="ow">and</span> <span class="s">&#39;AWS_SECRET_ACCESS_KEY&#39;</span> <span class="ow">in</span> <span class="n">app</span><span class="o">.</span><span class="n">config</span><span class="p">:</span>
+        <span class="n">password</span> <span class="o">=</span> <span class="n">app</span><span class="o">.</span><span class="n">config</span><span class="p">[</span><span class="s">&#39;AWS_SECRET_ACCESS_KEY&#39;</span><span class="p">]</span>
+    <span class="k">if</span> <span class="n">bucket_name</span> <span class="ow">is</span> <span class="bp">None</span> <span class="ow">and</span> <span class="s">&#39;S3_BUCKET_NAME&#39;</span> <span class="ow">in</span> <span class="n">app</span><span class="o">.</span><span class="n">config</span><span class="p">:</span>
+        <span class="n">bucket_name</span> <span class="o">=</span> <span class="n">app</span><span class="o">.</span><span class="n">config</span><span class="p">[</span><span class="s">&#39;S3_BUCKET_NAME&#39;</span><span class="p">]</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">bucket_name</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s">&quot;No bucket name provided.&quot;</span><span class="p">)</span>
+    <span class="c"># build list of static files</span>
+    <span class="n">all_files</span> <span class="o">=</span> <span class="n">_gather_files</span><span class="p">(</span><span class="n">app</span><span class="p">,</span> <span class="n">include_hidden</span><span class="p">)</span>
+    <span class="n">logger</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="s">&quot;All valid files: </span><span class="si">%s</span><span class="s">&quot;</span> <span class="o">%</span> <span class="n">all_files</span><span class="p">)</span>
+    <span class="n">conn</span> <span class="o">=</span> <span class="n">S3Connection</span><span class="p">(</span><span class="n">user</span><span class="p">,</span> <span class="n">password</span><span class="p">)</span> <span class="c"># connect to s3</span>
+    <span class="c"># get_or_create bucket</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">bucket</span> <span class="o">=</span> <span class="n">conn</span><span class="o">.</span><span class="n">create_bucket</span><span class="p">(</span><span class="n">bucket_name</span><span class="p">,</span> <span class="n">location</span><span class="o">=</span><span class="n">location</span><span class="p">)</span>
+            <span class="n">bucket</span><span class="o">.</span><span class="n">make_public</span><span class="p">(</span><span class="n">recursive</span><span class="o">=</span><span class="bp">True</span><span class="p">)</span>
+        <span class="k">except</span> <span class="n">S3CreateError</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+            <span class="k">if</span> <span class="n">e</span><span class="o">.</span><span class="n">error_code</span> <span class="o">==</span> <span class="s">u&#39;BucketAlreadyOwnedByYou&#39;</span><span class="p">:</span>
+                <span class="n">bucket</span> <span class="o">=</span> <span class="n">conn</span><span class="o">.</span><span class="n">get_bucket</span><span class="p">(</span><span class="n">bucket_name</span><span class="p">)</span>
+                <span class="k">if</span> <span class="n">force_refresh</span><span class="p">:</span>
+                    <span class="n">bucket</span><span class="o">.</span><span class="n">make_public</span><span class="p">(</span><span class="n">recursive</span><span class="o">=</span><span class="bp">True</span><span class="p">)</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="k">raise</span> <span class="n">e</span>
+    <span class="k">except</span> <span class="n">S3CreateError</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="n">e</span>
+    <span class="n">_upload_files</span><span class="p">(</span><span class="n">app</span><span class="p">,</span> <span class="n">all_files</span><span class="p">,</span> <span class="n">bucket</span><span class="p">)</span>
+
+</div>
+<div class="viewcode-block" id="FlaskS3"><a class="viewcode-back" href="../index.html#flask_s3.FlaskS3">[docs]</a><span class="k">class</span> <span class="nc">FlaskS3</span><span class="p">(</span><span class="nb">object</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    The FlaskS3 object allows your application to use Flask-S3.</span>
+
+<span class="sd">    When initialising a FlaskS3 object you may optionally provide your </span>
+<span class="sd">    :class:`flask.Flask` application object if it is ready. Otherwise, </span>
+<span class="sd">    you may provide it later by using the :meth:`init_app` method.</span>
+
+<span class="sd">    :param app: optional :class:`flask.Flask` application object</span>
+<span class="sd">    :type app: :class:`flask.Flask` or None</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">def</span> <span class="nf">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">app</span><span class="o">=</span><span class="bp">None</span><span class="p">):</span>
+        <span class="k">if</span> <span class="n">app</span> <span class="ow">is</span> <span class="ow">not</span> <span class="bp">None</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">init_app</span><span class="p">(</span><span class="n">app</span><span class="p">)</span>
+
+<div class="viewcode-block" id="FlaskS3.init_app"><a class="viewcode-back" href="../index.html#flask_s3.FlaskS3.init_app">[docs]</a>    <span class="k">def</span> <span class="nf">init_app</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">app</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        An alternative way to pass your :class:`flask.Flask` application</span>
+<span class="sd">        object to Flask-S3. :meth:`init_app` also takes care of some </span>
+<span class="sd">        default `settings`_.</span>
+
+<span class="sd">        :param app: the :class:`flask.Flask` application object.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">defaults</span> <span class="o">=</span> <span class="p">[(</span><span class="s">&#39;S3_URL_SCHEME&#39;</span><span class="p">,</span> <span class="bp">None</span><span class="p">),</span>
+                    <span class="p">(</span><span class="s">&#39;S3_USE_HTTPS&#39;</span><span class="p">,</span> <span class="bp">None</span><span class="p">),</span>
+                    <span class="p">(</span><span class="s">&#39;USE_S3&#39;</span><span class="p">,</span> <span class="bp">True</span><span class="p">),</span>
+                    <span class="p">(</span><span class="s">&#39;USE_GZIP&#39;</span><span class="p">,</span> <span class="bp">False</span><span class="p">),</span>
+                    <span class="p">(</span><span class="s">&#39;USE_S3_DEBUG&#39;</span><span class="p">,</span> <span class="bp">False</span><span class="p">),</span>
+                    <span class="p">(</span><span class="s">&#39;S3_BUCKET_DOMAIN&#39;</span><span class="p">,</span> <span class="s">&#39;s3.amazonaws.com&#39;</span><span class="p">),</span>
+                    <span class="p">(</span><span class="s">&#39;S3_CDN_DOMAIN&#39;</span><span class="p">,</span> <span class="s">&#39;&#39;</span><span class="p">),</span>
+                    <span class="p">(</span><span class="s">&#39;S3_USE_CACHE_CONTROL&#39;</span><span class="p">,</span> <span class="bp">False</span><span class="p">),</span>
+                    <span class="p">(</span><span class="s">&#39;S3_HEADERS&#39;</span><span class="p">,</span> <span class="p">{}),</span>
+                    <span class="p">(</span><span class="s">&#39;S3_GZIP_CONTENT_TYPES&#39;</span><span class="p">,</span> <span class="p">(</span>
+                        <span class="s">&#39;text/css&#39;</span><span class="p">,</span>
+                        <span class="s">&#39;application/javascript&#39;</span><span class="p">,</span>
+                        <span class="s">&#39;application/x-javascript&#39;</span><span class="p">,</span>
+                    <span class="p">)),</span>
+                    <span class="p">(</span><span class="s">&#39;S3_PREFIX&#39;</span><span class="p">,</span> <span class="bp">None</span><span class="p">),</span>
+                    <span class="p">(</span><span class="s">&#39;S3_UPLOAD_COCURRENCY&#39;</span><span class="p">,</span> <span class="mi">32</span><span class="p">)]</span>
+        <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">defaults</span><span class="p">:</span>
+            <span class="n">app</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">setdefault</span><span class="p">(</span><span class="n">k</span><span class="p">,</span> <span class="n">v</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="n">app</span><span class="o">.</span><span class="n">config</span><span class="p">[</span><span class="s">&#39;USE_S3&#39;</span><span class="p">]:</span>
+            <span class="n">app</span><span class="o">.</span><span class="n">jinja_env</span><span class="o">.</span><span class="n">globals</span><span class="p">[</span><span class="s">&#39;url_for&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">url_for</span>
+        <span class="k">if</span> <span class="n">app</span><span class="o">.</span><span class="n">config</span><span class="p">[</span><span class="s">&#39;S3_USE_CACHE_CONTROL&#39;</span><span class="p">]</span> <span class="ow">and</span> <span class="s">&#39;S3_CACHE_CONTROL&#39;</span> <span class="ow">in</span> <span class="n">app</span><span class="o">.</span><span class="n">config</span><span class="p">:</span>
+            <span class="n">cache_control_header</span> <span class="o">=</span> <span class="n">app</span><span class="o">.</span><span class="n">config</span><span class="p">[</span><span class="s">&#39;S3_CACHE_CONTROL&#39;</span><span class="p">]</span>
+            <span class="n">app</span><span class="o">.</span><span class="n">config</span><span class="p">[</span><span class="s">&#39;S3_HEADERS&#39;</span><span class="p">][</span><span class="s">&#39;Cache-Control&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">cache_control_header</span>
+        <span class="k">if</span> <span class="n">app</span><span class="o">.</span><span class="n">config</span><span class="p">[</span><span class="s">&#39;S3_URL_SCHEME&#39;</span><span class="p">]</span> <span class="ow">is</span> <span class="bp">None</span> <span class="ow">and</span> \
+           <span class="n">app</span><span class="o">.</span><span class="n">config</span><span class="p">[</span><span class="s">&#39;S3_USE_HTTPS&#39;</span><span class="p">]</span> <span class="ow">is</span> <span class="ow">not</span> <span class="bp">None</span><span class="p">:</span>
+            <span class="n">scheme</span> <span class="o">=</span> <span class="s">&#39;https&#39;</span> <span class="k">if</span> <span class="n">app</span><span class="o">.</span><span class="n">config</span><span class="p">[</span><span class="s">&#39;S3_USE_HTTPS&#39;</span><span class="p">]</span> <span class="k">else</span> <span class="s">&#39;http&#39;</span>
+            <span class="n">app</span><span class="o">.</span><span class="n">config</span><span class="p">[</span><span class="s">&#39;S3_URL_SCHEME&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">scheme</span>
+</pre></div></div></div>
+
+          </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+  
+    <a href="http://github.com/e-dard/flask-s3"><img style="position: fixed; top: 0; right: 0; border: 0;"
+    src="http://s3.amazonaws.com/github/ribbons/forkme_right_darkblue_121621.png" alt="Fork me on GitHub" /></a>
+  
+
+  
+
+  </body>
+</html>
