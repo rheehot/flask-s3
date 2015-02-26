@@ -11,7 +11,7 @@ import mimetypes
 from collections import defaultdict
 
 from flask import url_for as flask_url_for
-from flask import current_app
+from flask import current_app, request
 from boto.s3.connection import S3Connection
 from boto.exception import S3CreateError, S3ResponseError
 from boto.s3.key import Key
@@ -58,9 +58,11 @@ def url_for(endpoint, **values):
             mimetype = mimetypes.guess_type(values['filename'])[0]
         except KeyError:
             mimetype = None
-        if (mimetype in app.config['S3_GZIP_CONTENT_TYPES']) \
-            and app.config['USE_GZIP']:
-            values['filename'] = "%s.gz" % values['filename'] 
+        if app.config['USE_GZIP']:
+            accept_encoding = request.headers.get('Accept-Encoding', '')
+            if (mimetype in app.config['S3_GZIP_CONTENT_TYPES'] and
+                'gzip' in accept_encoding.lower()):
+                    values['filename'] += '.gz'
         url = urls.build(endpoint, values=values, force_external=True)
         if app.config['S3_URL_SCHEME'] is None:
             url = re.sub(r'^https://', '//', url)
